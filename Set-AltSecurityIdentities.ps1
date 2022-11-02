@@ -1,16 +1,14 @@
-﻿using namespace System
+#Requires -version 5
+
+using namespace System
 using namespace System.Collections
 using namespace System.Collections.Generic
-using namespace System.Collections.ObjectModel
 using namespace System.IO
 using namespace System.Management.Automation
-using namespace System.Management.Automation.Host
 using namespace System.Security
 using namespace System.Security.Cryptography
 using namespace System.Security.Cryptography.X509Certificates
 using namespace System.Windows.Forms
-using namespace System.Windows.Forms.Design
-using namespace System.Windows.Forms.VisualStyles
 using module ActiveDirectory
 
 [CmdletBinding(DefaultParameterSetName = "Dialog")]
@@ -46,11 +44,10 @@ Begin
     Add-Type -AssemblyName System.Security -ErrorAction Stop
     Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
     $Certs = [List[X509Certificate2]]::new()
-    $User = Get-ADUser -Identity $Identity -Server $Domain -Properties altSecurityIdentities
+    $User = Get-ADUser -Identity $Identity -Server $Domain -Properties altSecurityIdentities -ErrorAction Stop
 }
 Process
 {
-    
     If ($PSCmdlet.ParameterSetName -ieq "Certificate")
     {
         $Certs.Add($Certificate)
@@ -108,12 +105,15 @@ End
         }
     }
     $Hash = @{altSecurityIdentities = $AltSecId.ToArray()}
-    $Param = "Add"
-    If ($Replace -and $User.altSecurityIdentities -ne $null -and $User.altSecurityIdentities.Count -gt 0)
+    $Operation = "Add"
+    If ($Replace)
     {
-        $Param = "Replace"
-        "Replacing the following altSecurityIdentities values on user {0}:`n`n{1}" -f $User.DistinguishedName, ($User.altSecurityIdentities -join "`n") | Write-Warning
+        $Operation = "Replace"
+        If ($User.altSecurityIdentities -ne $null -and $User.altSecurityIdentities.Count -gt 0)
+        {
+            "Replacing the following altSecurityIdentities values on user {0}:`n`n{1}" -f $User.DistinguishedName, ($User.altSecurityIdentities -join "`n") | Write-Warning
+        }
     }
-    $Params = @{$Param = $Hash}
-    $User | Set-ADUser -Server $Domain @Params
+    $Params = @{$Operation = $Hash}
+    $User | Set-ADUser -Server $Domain @Operation
 }
