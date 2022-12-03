@@ -12,6 +12,13 @@ using namespace System.Security.Cryptography
 using namespace System.Security.Cryptography.X509Certificates
 using namespace System.Text
 
+[CmdletBinding()]
+Param(
+    [Parameter(Mandatory = $false)]
+    [SwitchParameter]
+    $Sign
+)
+
 Add-Type -AssemblyName System.Security -ErrorAction Stop
 
 $ModuleName = "CertRequestTools.psm1"
@@ -21,6 +28,7 @@ $InstallScript = "Install-CertReqUtil.ps1"
 $TempFolderName = [Guid]::NewGuid().ToString()
 $MyPath = $PSScriptRoot
 $TempPath = [Path]::Combine($MyPath, $TempFolderName)
+"Creating temporary directory {0}" -f $TempPath | Write-Verbose
 New-Item -ItemType Directory -Path $TempPath -Force -ErrorAction Stop | Out-Null
 
 $FilesToProcess = [List[String]]::new()
@@ -87,6 +95,7 @@ public class ConversionEventHandler : ITypeLibImporterNotifySink
     }
 }
 "@
+"Compiling type library converter helpers" | Write-Verbose
 Add-Type -TypeDefinition $TlbConverterCode -Language CSharp -ReferencedAssemblies mscorlib, System.Security, System.Management.Automation, System.Linq -ErrorAction Stop
 
 # Create wrapper libraries for the certificate COM libraries so we can call the methods from managed code instead of COM.
@@ -104,9 +113,18 @@ Foreach ($Lib in $CertLibs.GetEnumerator())
     $TargetFile = [System.IO.Path]::Combine($Folder, $Lib.Value)
     If ([File]::Exists($TargetFile))
     {
+        "Removing item {0}" -f $TargetFile | Write-Verbose
         Remove-Item -LiteralPath $TargetFile -Force -ErrorAction Stop
     }
-    [TlbConvert]::Convert($Lib.Key, $Lib.Value)
+    Try
+    {
+        "Creating type library {0} over COM DLL {1}" -f $Lib.Value, $Lib.Key | Write-Verbose
+        [TlbConvert]::Convert($Lib.Key, $Lib.Value)
+    }
+    Catch
+    {
+        throw $_.Exception
+    }
     $MovedFile = Move-Item -Path $TargetFile -Destination $TempPath -PassThru -Force -ErrorAction Stop
     $FilesToProcess.Add($MovedFile.FullName)
 }
@@ -384,7 +402,7 @@ namespace CERTADMIN
 		public virtual extern int DeleteRow([In][MarshalAs(UnmanagedType.BStr)] string strConfig, [In] int Flags, [In] DateTime Date, [In] int Table, [In] int RowId);
 	}
 }
-namespace CertSidExtension
+namespace X509Extensions
 {
     public enum CertAltNameType
     {
@@ -459,7 +477,7 @@ namespace CertSidExtension
         [MarshalAs(UnmanagedType.Struct)]
         public CRYPT_BLOB Value;
     }
-    public static class Crypt
+    public static class SidExtension
     {
         [DllImport("Crypt32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -476,7 +494,7 @@ namespace CertSidExtension
         );
         public const string szOID_SUBJECT_ALT_NAME2 = "2.5.29.17";
 
-        public static byte[] EncodeSidExtension(SecurityIdentifier sid)
+        public static byte[] Encode(SecurityIdentifier sid)
         {
             if (sid == null)
                 throw new ArgumentNullException("sid");
@@ -571,97 +589,98 @@ namespace CertSidExtension
             }
         }
     }
-}
-// Courtesy of https://github.com/NoMoreFood/Crypture/blob/master/Code/CertificateNative.cs
-// Used to enumerate all ExtendedKeyUsages known to the local system (including the ones defined in AD).
 
-public static class NativeMethods
-{
+    // Courtesy of https://github.com/NoMoreFood/Crypture/blob/master/Code/CertificateNative.cs
+    // Used to enumerate all ExtendedKeyUsages known to the local system (including the ones defined in AD).
+    public static class ExtendedKeyUsage
+    {
 #pragma warning disable 0649
-    internal struct CRYPT_OID_INFO
-    {
-        internal uint cbSize;
-
-        [MarshalAs(UnmanagedType.LPStr)]
-        internal string pszOID;
-
-        [MarshalAs(UnmanagedType.LPWStr)]
-        internal string pwszName;
-
-        internal uint dwGroupId;
-        internal uint Algid;
-    }
-
-    internal delegate bool CryptEnumCallback(IntPtr pInfo, ref OidCollection pvParam);
-
-    [DllImport("crypt32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool CryptEnumOIDInfo(OidGroup oGroupId, UInt32 dwFlags, ref OidCollection pvParam, CryptEnumCallback oFunc);
-
-    internal static bool GetExtendedKeyUsagesCallback(IntPtr pInfo, ref OidCollection pvParam)
-    {
-        CRYPT_OID_INFO oInfo = (CRYPT_OID_INFO) Marshal.PtrToStructure(pInfo, typeof(CRYPT_OID_INFO));
-        OidCollection ExtendedKeyUsages = (OidCollection)pvParam;
-        ExtendedKeyUsages.Add(new Oid(oInfo.pszOID, oInfo.pwszName));
-        return true;
-    }
-
-    internal static OidCollection GetExtendedKeyUsages()
-    {
-        OidCollection ExtendedKeyUsages = new OidCollection();
-        CryptEnumOIDInfo(OidGroup.EnhancedKeyUsage, 0, ref ExtendedKeyUsages, GetExtendedKeyUsagesCallback);
-        return ExtendedKeyUsages;
-    }
-    
-    public static readonly OidCollection SystemOidList = GetExtendedKeyUsages();
-    
-    internal static ILookup<String, Oid> GetEkuLookupTable()
-    {
-        return SystemOidList.Cast<Oid>().ToLookup(oid => Regex.Replace(CultureInfo.InvariantCulture.TextInfo.ToTitleCase(oid.FriendlyName), "\\s", ""), StringComparer.CurrentCultureIgnoreCase);
-    }
-    
-    public static readonly ILookup<String, Oid> EkuLookup = GetEkuLookupTable();
-
-    private static readonly Regex WildcardRegex = new Regex("\\\\\\*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    public static String ToWildcardPattern(this String pattern)
-    {
-        // Build a wildcard matching regex by replacing all instances of the "*" character with ".*".
-        // To avoid problems, first replace multiple consecutive "*" with a single one, and Regex.Escape the string before replacing the characters.
-        // Finally, surround the pattern with "^" and "$" to make it a literal match, giving the user full control of the pattern with "*"'s.
-        return new StringBuilder("^")
-            .Append(
-                WildcardRegex.Replace(
-                    Regex.Escape(
-                        Regex.Replace(pattern, "\\*+", "*")
-                    )
-                    , ".*")
-                )
-            .Append("$").ToString();
-    }
-
-    public static List<Oid> FindMatchingOids(String pattern)
-    {
-        if (String.IsNullOrEmpty(pattern))
-            throw new ArgumentNullException("pattern");
-
-        var regex = new Regex(pattern.ToWildcardPattern(), RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-        var list = new List<Oid>();
-
-        foreach (var oidGroup in EkuLookup)
+        internal struct CRYPT_OID_INFO
         {
-            var keyMatch = regex.IsMatch(oidGroup.Key); // Match the key (shorthand friendly name) first
-            
-            foreach (var oid in oidGroup)
-            {
-                if (keyMatch || regex.IsMatch(oid.FriendlyName)) // If the key matched, skip matching each entry for increased performance (lazy evaluation)
-                    list.Add(oid);
-            }
+            internal uint cbSize;
+
+            [MarshalAs(UnmanagedType.LPStr)]
+            internal string pszOID;
+
+            [MarshalAs(UnmanagedType.LPWStr)]
+            internal string pwszName;
+
+            internal uint dwGroupId;
+            internal uint Algid;
         }
-        return list;
+
+        internal delegate bool CryptEnumCallback(IntPtr pInfo, ref OidCollection pvParam);
+
+        [DllImport("crypt32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool CryptEnumOIDInfo(OidGroup oGroupId, UInt32 dwFlags, ref OidCollection pvParam, CryptEnumCallback oFunc);
+
+        internal static bool GetExtendedKeyUsagesCallback(IntPtr pInfo, ref OidCollection pvParam)
+        {
+            CRYPT_OID_INFO oInfo = (CRYPT_OID_INFO) Marshal.PtrToStructure(pInfo, typeof(CRYPT_OID_INFO));
+            OidCollection ExtendedKeyUsages = (OidCollection)pvParam;
+            ExtendedKeyUsages.Add(new Oid(oInfo.pszOID, oInfo.pwszName));
+            return true;
+        }
+
+        internal static OidCollection GetExtendedKeyUsages()
+        {
+            OidCollection ExtendedKeyUsages = new OidCollection();
+            CryptEnumOIDInfo(OidGroup.EnhancedKeyUsage, 0, ref ExtendedKeyUsages, GetExtendedKeyUsagesCallback);
+            return ExtendedKeyUsages;
+        }
+    
+        public static readonly OidCollection SystemOidList = GetExtendedKeyUsages();
+    
+        internal static ILookup<String, Oid> GetEkuLookupTable()
+        {
+            return SystemOidList.Cast<Oid>().ToLookup(oid => Regex.Replace(CultureInfo.InvariantCulture.TextInfo.ToTitleCase(oid.FriendlyName), "\\s", ""), StringComparer.CurrentCultureIgnoreCase);
+        }
+    
+        public static readonly ILookup<String, Oid> EkuLookup = GetEkuLookupTable();
+
+        private static readonly Regex WildcardRegex = new Regex("\\\\\\*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        public static String ToWildcardPattern(this String pattern)
+        {
+            // Build a wildcard matching regex by replacing all instances of the "*" character with ".*".
+            // To avoid problems, first replace multiple consecutive "*" with a single one, and Regex.Escape the string before replacing the characters.
+            // Finally, surround the pattern with "^" and "$" to make it a literal match, giving the user full control of the pattern with "*"'s.
+            return new StringBuilder("^")
+                .Append(
+                    WildcardRegex.Replace(
+                        Regex.Escape(
+                            Regex.Replace(pattern, "\\*+", "*")
+                        )
+                        , ".*")
+                    )
+                .Append("$").ToString();
+        }
+
+        public static List<Oid> FindMatchingOids(String pattern)
+        {
+            if (String.IsNullOrEmpty(pattern))
+                throw new ArgumentNullException("pattern");
+
+            var regex = new Regex(pattern.ToWildcardPattern(), RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+            var list = new List<Oid>();
+
+            foreach (var oidGroup in EkuLookup)
+            {
+                var keyMatch = regex.IsMatch(oidGroup.Key); // Match the key (shorthand friendly name) first
+            
+                foreach (var oid in oidGroup)
+                {
+                    if (keyMatch || regex.IsMatch(oid.FriendlyName)) // If the key matched, skip matching each entry for increased performance (lazy evaluation)
+                        list.Add(oid);
+                }
+            }
+            return list;
+        }
     }
 }
+
 public static class Crypt
 {
     private static readonly RandomNumberGenerator rng = RandomNumberGenerator.Create();
@@ -1025,7 +1044,7 @@ public abstract class StandardExtensionsCmdletBase
                     var oidString = obj as String;
                     if (!String.IsNullOrEmpty(oidString))
                     {
-                        if (Regex.IsMatch(oidString, "^\\d(\\.\\d+)+"))
+                        if (Regex.IsMatch(oidString, "^\\d(\\.\\d+)+$"))
                         {
                             // String is a dotted OID string
                             ekuCollection.Add(new Oid(oidString));
@@ -1034,7 +1053,7 @@ public abstract class StandardExtensionsCmdletBase
                         {
                             // String is literal. Do a wildcard match against the OID lookup list
                             // Possible future enhancement: save each individual wildcard pattern together with its result in a dictionary, and return the saved result if it is found
-                            foreach (var entry in NativeMethods.FindMatchingOids(oidString))
+                            foreach (var entry in X509Extensions.ExtendedKeyUsage.FindMatchingOids(oidString))
                             {
                                 ekuCollection.Add(entry);
                             }
@@ -1393,37 +1412,65 @@ public class SubmitCertificateRequestCommand
 
 $CertReqUtilDllName = "CertReqUtil.dll"
 $CertReqUtilDllPath = [Path]::Combine($TempPath, $CertReqUtilDllName)
-If (![File]::Exists($File))
+
+$BaseAssemblies = [String[]]@("mscorlib.dll", "System.dll", "System.Core.dll", "System.Runtime.dll", "System.Security.dll", "System.Linq.dll", [PSCmdlet].Assembly.Location)
+$Assemblies = [List[String]]::new($BaseAssemblies)
+$Assemblies.AddRange($FilesToProcess)
+$Parameters = [CompilerParameters]::new($Assemblies)
+$Parameters.CompilerOptions = "/unsafe"
+$Parameters.OutputAssembly = $CertReqUtilDllPath
+$Parameters.GenerateInMemory = $false
+
+$Provider = [System.CodeDom.Compiler.CodeDomProvider]::CreateProvider("CSharp")
+"Compiling {0}" -f $CertReqUtilDllName | Write-Verbose
+$Results = $Provider.CompileAssemblyFromSource($Parameters, $Code)
+$Results.Errors
+If ($Results.Errors.Count -gt 0)
 {
-    $BaseAssemblies = [String[]]@("mscorlib.dll", "System.dll", "System.Core.dll", "System.Runtime.dll", "System.Security.dll", "System.Linq.dll", [PSCmdlet].Assembly.Location)
-    $Assemblies = [List[String]]::new($BaseAssemblies)
-    $Assemblies.AddRange($FilesToProcess)
-    $Parameters = [CompilerParameters]::new($Assemblies)
-    $Parameters.CompilerOptions = "/unsafe"
-    $Parameters.OutputAssembly = $CertReqUtilDllPath
-    $Parameters.GenerateInMemory = $false
+    return
+}
+$FilesToProcess.Add($CertReqUtilDllPath)
 
-    $Provider = [System.CodeDom.Compiler.CodeDomProvider]::CreateProvider("CSharp")
-    $Results = $Provider.CompileAssemblyFromSource($Parameters, $Code)
-
-    $FilesToProcess.Add($CertReqUtilDllPath)
+$ModuleName,$ManifestName | ForEach-Object -Process {
+    $ItemPath = [Path]::Combine($MyPath, $_)
+    $Item = Copy-Item -Path $ItemPath -Destination $TempPath -PassThru -Force
+    $FilesToProcess.Add($Item)
 }
 
-$ModulePath = [Path]::Combine($MyPath, $ModuleName)
-$Module = Copy-Item -Path $ModulePath -Destination $TempPath -PassThru -Force
-$FilesToProcess.Add($Module)
+$InstallerPath = [Path]::Combine($MyPath, $InstallScript)
 
-$ManifestPath = [Path]::Combine($MyPath, $ManifestName)
-$Manifest = Copy-Item -Path $ManifestPath -Destination $TempPath -PassThru -Force
-$FilesToProcess.Add($Manifest)
+If ($Sign)
+{
+    "Signing certificate selection" | Write-Host
+    $Location = [Enum]::Parse([StoreLocation], ([Enum]::GetNames([StoreLocation]) | Out-GridView -OutputMode Single -Title "Select a certificate store location"))
+    $Name = [StoreName]::My
+    $Store = [X509Store]::new($Name, $Location)
+    $Store.Open("ReadOnly, MaxAllowed, OpenExistingOnly")
+    $Certs = [X509Certificate2UI]::SelectFromCollection(
+        $Store.Certificates.Find("FindByApplicationPolicy", "1.3.6.1.5.5.7.3.3", $true) # Code Signing
+        , "Certificate selection"
+        , "Select a signing certificate"
+        , [X509SelectionFlag]::SingleSelection)
+    $Store.Dispose()
+
+    If ($Certs.Count -eq 0)
+    {
+        throw "No signing certificate selected"
+    }
+    $SigningCert = $Certs[0]
+    If (!$SigningCert.HasPrivateKey)
+    {
+        throw "Selected signing certificate does not have a private key"
+    }
+    $SigningResults = $FilesToProcess | Set-AuthenticodeSignature -Certificate $SigningCert -IncludeChain All -HashAlgorithm SHA256 -Force -ErrorAction Stop
+    $InstallerPath | Set-AuthenticodeSignature -Certificate $SigningCert -IncludeChain all -HashAlgorithm SHA256 -Force -ErrorAction Stop | Out-Null
+}
 
 $ZipArchiveName = [Path]::ChangeExtension([Path]::GetFileName($ModuleName),"zip")
-$ZipPath = [Path]::Combine($PSScriptRoot, $ZipArchiveName)
+$ZipPath = [Path]::Combine($MyPath, $ZipArchiveName)
 $FilesToProcess | Compress-Archive -DestinationPath $ZipPath -Force -CompressionLevel Optimal
 
 Remove-Item -LiteralPath $TempPath -Recurse -Force
-
-$InstallerPath = [Path]::Combine($MyPath, $InstallScript)
 
 $CombinedZipName = "Install{0}" -f $ZipArchiveName
 $CombinedZipPath = [Path]::Combine($PSScriptRoot, $CombinedZipName)

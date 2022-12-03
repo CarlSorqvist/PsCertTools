@@ -343,11 +343,11 @@ Function Get-ExtendedKeyUsage
         $OidList = $null
         If ($PSCmdlet.ParameterSetName -ieq "All")
         {
-            $OidList = [System.Collections.Generic.List[System.Security.Cryptography.Oid]]::new([System.Security.Cryptography.Oid[]][NativeMethods]::SystemOidList)
+            $OidList = [System.Collections.Generic.List[System.Security.Cryptography.Oid]]::new([System.Security.Cryptography.Oid[]][X509Extensions.ExtendedKeyUsage]::SystemOidList)
         }
         Else
         {
-            $OidList = [NativeMethods]::FindMatchingOids($Name)
+            $OidList = [X509Extensions.ExtendedKeyUsage]::FindMatchingOids($Name)
         }
         If ($Select)
         {
@@ -386,7 +386,7 @@ Function New-SidExtension
                 throw
             }
         }
-        [System.Security.Cryptography.X509Certificates.X509Extension]::new("1.3.6.1.4.1.311.25.2", [CertSidExtension.Crypt]::EncodeSidExtension($Sid), $false)
+        [System.Security.Cryptography.X509Certificates.X509Extension]::new("1.3.6.1.4.1.311.25.2", [X509Extensions.SidExtension]::Encode($Sid), $false)
     }
 }
 
