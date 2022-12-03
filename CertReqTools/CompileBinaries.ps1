@@ -1424,11 +1424,6 @@ $Parameters.GenerateInMemory = $false
 $Provider = [System.CodeDom.Compiler.CodeDomProvider]::CreateProvider("CSharp")
 "Compiling {0}" -f $CertReqUtilDllName | Write-Verbose
 $Results = $Provider.CompileAssemblyFromSource($Parameters, $Code)
-$Results.Errors
-If ($Results.Errors.Count -gt 0)
-{
-    return
-}
 $FilesToProcess.Add($CertReqUtilDllPath)
 
 $ModuleName,$ManifestName | ForEach-Object -Process {
@@ -1437,7 +1432,8 @@ $ModuleName,$ManifestName | ForEach-Object -Process {
     $FilesToProcess.Add($Item)
 }
 
-$InstallerPath = [Path]::Combine($MyPath, $InstallScript)
+$InstallerPath = [Path]::Combine($TempPath, $InstallScript)
+Copy-Item -LiteralPath ([Path]::Combine($MyPath, $InstallScript)) -Destination $TempPath -Force
 
 If ($Sign)
 {
@@ -1462,6 +1458,7 @@ If ($Sign)
     {
         throw "Selected signing certificate does not have a private key"
     }
+    "Signing files" | Write-Verbose
     $SigningResults = $FilesToProcess | Set-AuthenticodeSignature -Certificate $SigningCert -IncludeChain All -HashAlgorithm SHA256 -Force -ErrorAction Stop
     $InstallerPath | Set-AuthenticodeSignature -Certificate $SigningCert -IncludeChain all -HashAlgorithm SHA256 -Force -ErrorAction Stop | Out-Null
 }
@@ -1470,11 +1467,10 @@ $ZipArchiveName = [Path]::ChangeExtension([Path]::GetFileName($ModuleName),"zip"
 $ZipPath = [Path]::Combine($MyPath, $ZipArchiveName)
 $FilesToProcess | Compress-Archive -DestinationPath $ZipPath -Force -CompressionLevel Optimal
 
-Remove-Item -LiteralPath $TempPath -Recurse -Force
-
 $CombinedZipName = "Install{0}" -f $ZipArchiveName
 $CombinedZipPath = [Path]::Combine($PSScriptRoot, $CombinedZipName)
 
 $InstallerPath,$ZipPath | Compress-Archive -DestinationPath $CombinedZipPath -Force -CompressionLevel Optimal
 
+Remove-Item -LiteralPath $TempPath -Recurse -Force
 Remove-Item -LiteralPath $ZipPath -Force
