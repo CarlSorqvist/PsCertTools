@@ -827,4 +827,69 @@ Function New-CertificatePolicy
     }
 }
 
-Export-ModuleMember -Function * -Cmdlet *
+Function Install-Certificate
+{
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Alias("Cert")]
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]
+        $Certificate
+
+        , [Parameter(Mandatory = $false)]
+        [System.Security.Cryptography.X509Certificates.StoreLocation]
+        $Location = [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
+
+        , [Parameter(Mandatory = $false)]
+        [System.Security.Cryptography.X509Certificates.StoreName]
+        $Name = [System.Security.Cryptography.X509Certificates.StoreName]::My
+    )
+    Begin
+    {
+        $Store = [System.Security.Cryptography.X509Certificates.X509Store]::new($Name, $Location)
+        $Store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::OpenExistingOnly -bor [System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+    }
+    Process
+    {
+        If (!$Certificate.HasPrivateKey)
+        {
+            "No private key found for certificate '{0}' ({1}). To import a public certificate, use the built-in Import-Certificate cmdlet." -f $Certificate.Thumbprint, $Certificate.Subject | Write-Error
+            return
+        }
+        Else
+        {
+            # Assume that we have an RSA private key by default
+
+            $PrivateKey = $null
+            $PrivateKey = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($Certificate)
+            If ($PrivateKey -eq $null)
+            {
+                $PrivateKey = [System.Security.Cryptography.X509Certificates.ECDsaCertificateExtensions]::GetECDsaPrivateKey($Certificate)
+
+                # If the public key is still null, we have a non-supported algorithm
+                If ($PrivateKey -eq $null)
+                {
+                    "Only RSA and ECC certificates are supported." | Write-Error
+                    return
+                }
+                $PrivateKey | Out-Host
+
+                # To persist a certificate, the private key must not be ephemeral
+                If ($PrivateKey.Key.IsEphemeral)
+                {
+                    "Can only install certificate with non-ephemeral keys (where KeyName is not null or empty). If the private key was created with New-PrivateKey, use the -KeyName parameter to create a persisted key." | Write-Error
+                    return
+                }
+            }
+            $Store.Add($Certificate)
+        }
+    }
+    End
+    {
+        $Store.Close()
+        $Store.Dispose()
+    }
+}
+New-Alias -Name Save-Certificate -Value Install-Certificate
+
+Export-ModuleMember -Function * -Cmdlet * -Alias *
