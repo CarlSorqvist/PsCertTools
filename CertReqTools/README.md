@@ -2,7 +2,7 @@
 
 PowerShell 5 module that simplifies generating, submitting and retrieving certificate requests and certificates towards an Active Directory Certificate Services CA.
 
-The module is built to suit a very specific use case - environments where precompiled binares are not allowed, such as OT or otherwise critical platforms. As such, all the code used is completely transparent and uses no third-party tools or equivalent - all the code is compiled inline inside the environment with optional code signing from an internal code signing certificate.
+The module is built to suit a very specific use case - environments where precompiled binares are not allowed, such as OT or otherwise critical platforms. As such, all the code used is completely transparent and uses no third-party tools or equivalent - everything is compiled inline inside the environment with optional code signing from an internal or external code signing certificate.
 
 ## Prerequisites
 
