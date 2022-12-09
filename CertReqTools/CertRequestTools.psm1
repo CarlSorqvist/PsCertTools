@@ -872,7 +872,6 @@ Function Install-Certificate
                     "Only RSA and ECC certificates are supported." | Write-Error
                     return
                 }
-                $PrivateKey | Out-Host
 
                 # To persist a certificate, the private key must not be ephemeral
                 If ($PrivateKey.Key.IsEphemeral)
