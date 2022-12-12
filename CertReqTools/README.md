@@ -63,6 +63,10 @@ cd C:\InstallCertReqUtil
 .\Install-CertReqUtil.ps1
 ```
 The module is automatically installed in the system-wide Modules folder in System32.
+5. Install the `RSAT-ADCS-Mgmt` feature
+```
+Install-WindowsFeature -Name RSAT-ADCS-Mgmt
+```
 
 # Usage
 
