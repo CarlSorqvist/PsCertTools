@@ -1,4 +1,4 @@
-#Requires -version 5
+﻿#Requires -version 5
 
 using namespace System
 using namespace System.Collections
@@ -115,5 +115,5 @@ End
         }
     }
     $Params = @{$Operation = $Hash}
-    $User | Set-ADUser -Server $Domain @Operation
+    $User | Set-ADUser -Server $Domain @Params
 }
