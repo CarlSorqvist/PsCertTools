@@ -107,10 +107,11 @@ $CertLibs = @{
     "C:\Windows\System32\certenc.dll" = "CERTENClib.dll"
 }
 
+[Directory]::SetCurrentDirectory($TempPath)
 Foreach ($Lib in $CertLibs.GetEnumerator())
 {
-    $Folder = [System.IO.Path]::GetDirectoryName($Lib.Key)
-    $TargetFile = [System.IO.Path]::Combine($Folder, $Lib.Value)
+    $Folder = [Path]::GetDirectoryName($Lib.Key)
+    $TargetFile = [Path]::Combine($TempPath, $Lib.Value)
     If ([File]::Exists($TargetFile))
     {
         "Removing item {0}" -f $TargetFile | Write-Verbose
@@ -125,8 +126,7 @@ Foreach ($Lib in $CertLibs.GetEnumerator())
     {
         throw $_.Exception
     }
-    $MovedFile = Move-Item -Path $TargetFile -Destination $TempPath -PassThru -Force -ErrorAction Stop
-    $FilesToProcess.Add($MovedFile.FullName)
+    $FilesToProcess.Add($TargetFile)
 }
 
 $Code = @"
@@ -1471,6 +1471,8 @@ $CombinedZipName = "Install{0}" -f $ZipArchiveName
 $CombinedZipPath = [Path]::Combine($PSScriptRoot, $CombinedZipName)
 
 $InstallerPath,$ZipPath | Compress-Archive -DestinationPath $CombinedZipPath -Force -CompressionLevel Optimal
+
+[Directory]::SetCurrentDirectory([Directory]::GetParent($TempPath))
 
 Remove-Item -LiteralPath $TempPath -Recurse -Force
 Remove-Item -LiteralPath $ZipPath -Force
