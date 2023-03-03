@@ -42,7 +42,7 @@ cd C:\Scripts\CertReqTools
 .\CompileBinaries.ps1 -Sign
 ```
 6. If the -Sign parameter was specified, select the desired Code Signing certificate store location (`CurrentUser` or `LocalMachine`), then select a signing certificate 
-7. The script will output a ZIP archive with the install script and another ZIP archive containing the module files
+7. The script will output a ZIP archive with both the install script and another ZIP archive containing the module files
 ```
 InstallCertRequestTools.zip
 ```
