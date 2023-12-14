@@ -485,6 +485,10 @@ Function Export-CertificateToPfx
         , [Parameter(Mandatory = $true, ParameterSetName = "Generate")]
         [Switch]
         $GeneratePassword
+
+        , [Parameter(Mandatory = $false)]
+        [Microsoft.CertificateServices.Commands.CryptoAlgorithmOptions]
+        $EncryptionAlgorithm = [Microsoft.CertificateServices.Commands.CryptoAlgorithmOptions]::AES256_SHA256
     )
     Process
     {
@@ -552,7 +556,7 @@ Function Export-CertificateToPfx
         $Properties = @{
             FilePath = $OutputFilename
             ChainOption = $ChainOption
-            CryptoAlgorithmOption = [Microsoft.CertificateServices.Commands.CryptoAlgorithmOptions]::AES256_SHA256
+            CryptoAlgorithmOption = $EncryptionAlgorithm
             Force = $true
         }
         $Credential = $null
