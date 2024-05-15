@@ -1,6 +1,6 @@
 # Introduction
 
-NTAuth Guard provides a method of ensuring that the `NTAuthCertificates` object is kept "clean", i.e. if a new certificate is added to the cACertificate attribute that is not previously approved, it is automatically removed.
+NTAuth Guard provides a method of ensuring that the `NTAuthCertificates` object is kept "clean", i.e. if a new certificate is added to its `cACertificate` attribute that is not previously approved, it is automatically removed.
 
 # Description
 
@@ -12,3 +12,5 @@ The cleanup feature is performed by the `Invoke-NTAuthCleanup.ps1` script, which
 * `Create-NTAuthGuardTask.ps1` creates the task on domain controllers. It is designed to run on each boot through Startup scripts in GPO, and will check if the task exists and create it if it doesn't.
 * `Invoke-NTAuthCleanup.ps1` is the main script that performs the cleanup. It, and the whitelist, is placed in a location (NETLOGON is recommended) that is accessible by all DCs.
 * `NTAuthDelegation.ps1` creates the delegation to write to the `cACertificate` attribute, and adds an audit rule that will be used to trigger the task.
+
+Additionally, the whitelist is contained in a simple UTF-8 encoded text file that is named `whitelist.txt` by default. It is not included in the repo, but can simply be created manually.
