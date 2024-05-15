@@ -14,3 +14,57 @@ The cleanup feature is performed by the `Invoke-NTAuthCleanup.ps1` script, which
 * `NTAuthDelegation.ps1` creates the delegation to write to the `cACertificate` attribute, and adds an audit rule that will be used to trigger the task.
 
 Additionally, the whitelist is contained in a simple UTF-8 encoded text file that is named `whitelist.txt` by default. It is not included in the repo, but can simply be created manually.
+
+## Logging
+
+By default, the script logs its actions, warnings and errors to the `Application` event log, using a custom event source `NTAuthGuard`. This can be modified by the parameters in the `Create-NTAuthGuardTask.ps1` task, however remember that the service account needs permission to write to the event log
+
+# Installation
+
+* Create the gMSA by running the `Create-Gmsa.ps1` script on a server in the forest root domain, or create it manually. If you use the script, update the `$FQDN` variable before running it. By default, the account is named `s0ntauthguard`, which is used in the rest of the scripts as well. The script automatically allows the `Domain Controllers` group access to the service account.
+* The gMSA is created in the default `Managed Service Accounts` container. If you have an OU specifically for Tier0 service accounts, you can optionally move it.
+* Create a delegation group that will be used to delegate `WriteProperty`  rights to the `cACertificate` attribute of the `NTAuthCertificates` object. By default, this group is named `d0_pki_ntauth_cacert__w`.
+* Add the service account as a member of the newly created delegation group.
+* Update the group name in the `NTAuthDelegation.ps1` script if necessary, then run it. It will ask for confirmation before attempting to update the security descriptor of `NTAuthCertificates`.
+* Create a new folder named NTAuth in the NETLOGON folder of the forest root domain, for example `\\domain.com\NETLOGON\NTAuth`.
+* Copy the `Invoke-NTAuthCleanup.ps1` script to the previously created `NETLOGON\NTAuth` folder.
+* Create the whitelist file by opening notepad and saving it (with UTF-8 encoding) in the same `NETLOGON\NTAuth` folder as `whitelist.txt`. The whitelist should contain the thumbprints of each individual CA certificate, one per row. Example:
+
+```
+687DA7112CE6EF56DE87157D071FB9403FF7F9AC
+5E5391F744BCA147A9BB93B7EA0043D8C1718251
+7E7745F647CCC78CC254B684357F920D67772D45
+```
+
+* Open the `Create-NTAuthGuardTask.ps1` script in a text or code editor. Modify the parameters in the `#### PARAMETERS ####` section to suit your environment. **Note** that if you modify the event log or event source in this script, you must also update the corresponding `$EventLogParams` values in `Invoke-NTAuthCleanup.ps1`. 
+
+```
+#### PARAMETERS ####
+
+$TaskName = "NTAuth Guard"
+$TaskPath = "\"
+
+$EventLog = "Application"
+$EventSource = "NTAuthGuard"
+
+$ServiceAccount = "CORP\s0ntauthguard$"
+$ScriptPath = "\\corp.contoso.com\netlogon\NTAuth\Invoke-NTAuthCleanup.ps1"
+$WhiteListPath = "\\corp.contoso.com\netlogon\NTAuth\whitelist.txt"
+
+#### END PARAMETERS ####
+```
+
+* Create a GPO that will run `Create-NTAuthGuardTask.ps1` as a Startup script, name it according to your naming convention, for example `Tier0.DomainControllers.NTAuthGuard`. Add the modified `Create-NTAuthGuardTask.ps1` script to Startup scripts.
+* Link the GPO to the Domain Controllers OU.
+* Optionally, enable [Audit Directory Service Changes](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/audit-directory-service-changes) on all domain controllers. The script does not require you to, as it will run every 5 minutes anyway, but doing so enables a more immediate response to added certificates, minimizing impact if an unwanted CA certificate is added.
+* Run gpupdate /force on a DC and reboot it. Verify that the `NTAuth Guard` task was created successfully. Do the same with all other DCs.
+
+## Testing
+
+To verify that the task triggers as expected, you can add a test certificate to the NTAuth container through the following `certutil` command:
+
+`certutil -dspublish C:\temp\cert.crt NTAuthCA`
+
+If configured correctly, an event should be logged in the configured event log and source with event ID 1, confirming that the certificate was removed.
+
+**Please remember** that adding any certificate to NTAuth may put your environment at risk. If the script does not trigger and removes the certificate for some reason, **remove it manually** while troubleshooting. You can read more about NTAuth [here](https://blog.qdsecurity.se/2020/09/04/supply-in-the-request-shenanigans/) and [here](https://blog.qdsecurity.se/2024/04/07/forest-compromise-through-ama-abuse/#introduction-and-background).
