@@ -28,7 +28,7 @@ By default, the script logs its actions, warnings and errors to the `Application
 * Update the group name in the `NTAuthDelegation.ps1` script if necessary, then run it. It will ask for confirmation before attempting to update the security descriptor of `NTAuthCertificates`.
 * Create a new folder named NTAuth in the NETLOGON folder of the forest root domain, for example `\\domain.com\NETLOGON\NTAuth`.
 * Copy the `Invoke-NTAuthCleanup.ps1` script to the previously created `NETLOGON\NTAuth` folder.
-* Create the whitelist file by opening notepad and saving it (with UTF-8 encoding) in the same `NETLOGON\NTAuth` folder as `whitelist.txt`. The whitelist should contain the thumbprints of each individual CA certificate, one per row. Example:
+* Create the whitelist file by opening notepad and saving it (with UTF-8 encoding) in the same `NETLOGON\NTAuth` folder as `whitelist.txt`. The whitelist should contain the thumbprints of each individual CA certificate **that you wish to keep in NTAuth**, one per row. Example:
 
 ```
 687DA7112CE6EF56DE87157D071FB9403FF7F9AC
@@ -68,3 +68,12 @@ To verify that the task triggers as expected, you can add a test certificate to 
 If configured correctly, an event should be logged in the configured event log and source with event ID 1, confirming that the certificate was removed.
 
 **Please remember** that adding any certificate to NTAuth may put your environment at risk. If the script does not trigger and removes the certificate for some reason, **remove it manually** while troubleshooting. You can read more about NTAuth [here](https://blog.qdsecurity.se/2020/09/04/supply-in-the-request-shenanigans/) and [here](https://blog.qdsecurity.se/2024/04/07/forest-compromise-through-ama-abuse/#introduction-and-background).
+
+# Other notes
+
+## CA Certificate Renewal
+
+When an Enterprise CA certificate is renewed and subsequently installed in the CA, it is automatically published to NTAuth. However, as the whitelist has probably not been updated yet, the script would remove the renewed certificate. The script is designed to takes scenarios like this into account if the `-AllowImplicitRenewedCertificates` parameter is provided, which is the default when creating the task.
+However, if it does find a renewed certificate, it will log a warning to the Event Log informing administrators that they should update the whitelist with the thumbprint of the renewed certificate.
+
+
