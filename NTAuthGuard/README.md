@@ -23,7 +23,7 @@ By default, the script logs its actions, warnings and errors to the `Application
 
 * Create the gMSA by running the `Create-Gmsa.ps1` script on a server in the forest root domain, or create it manually. If you use the script, update the `$FQDN` variable before running it. By default, the account is named `s0ntauthguard`, which is used in the rest of the scripts as well. The script automatically allows the `Domain Controllers` group access to the service account.
 * The gMSA is created in the default `Managed Service Accounts` container. If you have an OU specifically for Tier0 service accounts, you can optionally move it.
-* Create a delegation group that will be used to delegate `WriteProperty`  rights to the `cACertificate` attribute of the `NTAuthCertificates` object. By default, this group is named `d0_pki_ntauth_cacert__w`.
+* Create a delegation group that will be used to delegate `WriteProperty`  rights to the `cACertificate` attribute of the `NTAuthCertificates` object. By default, this group is named `d0_pki_ntauth_cacert__w`. **Take care** that this group cannot be modified by anyone else than Enterprise Admins.
 * Add the service account as a member of the newly created delegation group.
 * Update the group name in the `NTAuthDelegation.ps1` script if necessary, then run it. It will ask for confirmation before attempting to update the security descriptor of `NTAuthCertificates`.
 * Create a new folder named NTAuth in the NETLOGON folder of the forest root domain, for example `\\domain.com\NETLOGON\NTAuth`.
