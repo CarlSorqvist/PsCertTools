@@ -61,7 +61,11 @@ $WhiteListPath = "\\corp.contoso.com\netlogon\NTAuth\whitelist.txt"
 * Link the GPO to the Domain Controllers OU.
 * Optionally, enable [Audit Directory Service Changes](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/audit-directory-service-changes) on all domain controllers. The script does not require you to, as it will run every 5 minutes anyway, but doing so enables a more immediate response, minimizing impact if an unwanted CA certificate is added.
 * Run gpupdate /force on a DC and reboot it. Verify that the `NTAuth Guard` task was created successfully. Do the same with all other DCs.
-* When all domain controllers have been rebooted and you have verified that event 97 is logged on all of them (indicating that the script is prevented from taking action), enable the script by assigning any non-null value to the `adminDisplayName` attribute of the `NTAuthCertificates` object.
+* When all domain controllers have been rebooted and you have verified that event 97 is logged on all of them (indicating that the script is prevented from taking action), enable the script by assigning any non-null value to the `adminDisplayName` attribute of the `NTAuthCertificates` object. You can use the following PowerShell command to assign the value `1` to `adminDisplayName`:
+
+```
+Set-ADObject -Identity ('CN=NTAuthCertificates,CN=Public Key Services,CN=Services,{0}' -f (Get-ADRootDSE).configurationNamingContext) -Replace @{adminDisplayName="1"}
+```
 
 ## Testing
 
@@ -81,7 +85,11 @@ There may be cases where admins want to temporarily disable the script across al
 
 * If the script is centrally distributed, i.e. it is located in the NETLOGON share and the task uses that script, you can simply rename the script and the task will fail as the script can no longer be found. This is the most immediate method, as DFS Replication is generally instant for small files across all domain controllers, however it is not a graceful method as no events will be logged indicating the situation.
 * Similarly, if the whitelist is centrally distributed (through the NETLOGON share or equivalent), you can rename it. This is a also immediate, and a slightly more graceful method as the script will still run but will not be able to find the whitelist, causing it to log errors.
-* As previously indicated, the `adminDisplayName` attribute of the `NTAuthCertificates` object must have a value or the script will not execute any actions. This is arguably the most graceful method, however it is not necessarily immediate across all DCs as it is dependent on directory replication.
+* As previously indicated, the `adminDisplayName` attribute of the `NTAuthCertificates` object must have a value or the script will not execute any actions. This is arguably the most graceful method, however it is not necessarily immediate across all DCs as it is dependent on directory replication. You can use the following command to clear the value:
+
+```
+Set-ADObject -Identity ('CN=NTAuthCertificates,CN=Public Key Services,CN=Services,{0}' -f (Get-ADRootDSE).configurationNamingContext) -Clear adminDisplayName
+```
 
 To re-enable the script later on, simply undo whatever action you went for and it should start working again.
 
