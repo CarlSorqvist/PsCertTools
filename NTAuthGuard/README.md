@@ -17,9 +17,12 @@ Additionally, the whitelist is contained in a simple UTF-8 encoded text file tha
 
 ## Logging
 
-By default, the script logs its actions, warnings and errors to the `Application` event log, using a custom event source `NTAuthGuard`. This can be modified by the parameters in the `Create-NTAuthGuardTask.ps1` task, however remember that the service account needs permission to write to the event log
+By default, the script logs its actions, warnings and errors to the `Application` event log, using a custom event source `NTAuthGuard`. This can be modified by the parameters in the `Create-NTAuthGuardTask.ps1` task, however remember that the service account needs permission to write to the event log of your choice without admin access.
 
 # Installation
+
+**Important**
+The script is designed to not execute any actions until explicitly enabled. To enable the script, set the `adminDisplayName` attribute of the `NTAuthCertificates` object to any non-null value. If you already have a value for this attribute in your environment that you do not wish to remove, consider modifying the `$EnablingAttribute` variable in `Invoke-NTAuthCleanup.ps1` to a different, writable and otherwise unused attribute. It is important that all versions of the script file uses the same attribute, or you will encounter unexpected behavior.
 
 * Create the gMSA by running the `Create-Gmsa.ps1` script on a server in the forest root domain, or create it manually. If you use the script, update the `$FQDN` variable before running it. By default, the account is named `s0ntauthguard`, which is used in the rest of the scripts as well. The script automatically allows the `Domain Controllers` group access to the service account.
 * The gMSA is created in the default `Managed Service Accounts` container. If you have an OU specifically for Tier0 service accounts, you can optionally move it.
@@ -58,6 +61,7 @@ $WhiteListPath = "\\corp.contoso.com\netlogon\NTAuth\whitelist.txt"
 * Link the GPO to the Domain Controllers OU.
 * Optionally, enable [Audit Directory Service Changes](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/audit-directory-service-changes) on all domain controllers. The script does not require you to, as it will run every 5 minutes anyway, but doing so enables a more immediate response, minimizing impact if an unwanted CA certificate is added.
 * Run gpupdate /force on a DC and reboot it. Verify that the `NTAuth Guard` task was created successfully. Do the same with all other DCs.
+* When all domain controllers have been rebooted and you have verified that event 97 is logged on all of them (indicating that the script is prevented from taking action), enable the script by assigning any non-null value to the `adminDisplayName` attribute of the `NTAuthCertificates` object.
 
 ## Testing
 
@@ -70,6 +74,14 @@ If configured correctly, an event should be logged in the configured event log a
 **Please remember** that adding any certificate to NTAuth may put your environment at risk. If the script does not trigger and removes the certificate for some reason, **remove it manually** while troubleshooting. You can read more about NTAuth [here](https://blog.qdsecurity.se/2020/09/04/supply-in-the-request-shenanigans/) and [here](https://blog.qdsecurity.se/2024/04/07/forest-compromise-through-ama-abuse/#introduction-and-background).
 
 # Other notes
+
+## Preventing the script from taking any actions
+
+There may be cases where admins want to temporarily disable the script across all domain controllers. There are multiple methods of accomplishing this.
+
+* If the script is centrally distributed, i.e. it is located in the NETLOGON share and the task uses that script, you can simply rename the script and the task will fail as the script can no longer be found. This is the most immediate method, as DFS Replication is generally instant for small files across all domain controllers, however it is not a graceful method as no events will be logged indicating the situation.
+* Similarly, if the whitelist is centrally distributed (through the NETLOGON share or equivalent), you can rename it. This is a also immediate, and a slightly more graceful method as the script will still run but will not be able to find the whitelist, causing it to log errors.
+* As previously indicated, the `adminDisplayName` attribute of the `NTAuthCertificates` object must have a value or the script will not execute any actions. This is arguably the most graceful method, however it is not necessarily immediate across all DCs as it is dependent on directory replication.
 
 ## CA Certificate Renewal
 
