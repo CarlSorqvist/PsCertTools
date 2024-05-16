@@ -83,6 +83,8 @@ There may be cases where admins want to temporarily disable the script across al
 * Similarly, if the whitelist is centrally distributed (through the NETLOGON share or equivalent), you can rename it. This is a also immediate, and a slightly more graceful method as the script will still run but will not be able to find the whitelist, causing it to log errors.
 * As previously indicated, the `adminDisplayName` attribute of the `NTAuthCertificates` object must have a value or the script will not execute any actions. This is arguably the most graceful method, however it is not necessarily immediate across all DCs as it is dependent on directory replication.
 
+To re-enable the script later on, simply undo whatever action you went for and it should start working again.
+
 ## CA Certificate Renewal
 
 When an Enterprise CA certificate is renewed and subsequently installed in the CA, it is automatically published to NTAuth. However, as the whitelist has probably not been updated yet, the script would remove the renewed certificate. The script is designed to takes scenarios like this into account if the `-AllowImplicitRenewedCertificates` parameter is provided, which is the default when creating the task.
