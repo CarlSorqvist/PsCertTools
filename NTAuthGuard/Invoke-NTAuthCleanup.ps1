@@ -26,7 +26,7 @@ Param(
     $ForestDomainName
 
     # If this parameter is provided, a renewed CA certificate that is not in the whitelist is accepted if the thumbprint in
-    # the Previous CA Certificate Hash (1.3.6.1.4.1.311.21.2) extension is present in the whitelist, and if the subject name matches.
+    # the Previous CA Certificate Hash (1.3.6.1.4.1.311.21.2) extension is present in the whitelist.
     # Note that this is only intended as a failsafe - it does not work recursively, i.e. if a CA certificate has been renewed twice,
     # but only the original CA certificate is published in NTAuth, then the first renewed CA certificate will match the original,
     # but the second renewed CA certificate will not match. This is intentional, as admins are expected to react to the logged
@@ -139,9 +139,13 @@ Begin
     # Use the case-insensitive comparer to ensure that upper/lowercase characters in the thumbprint does not matter.
     $StringComparer = [StringComparer]::InvariantCultureIgnoreCase
 
+    # Create a HashSet that will contain the thumbprints in the whitelist for easy lookup.
     $Whitelist = [HashSet[String]]::new($StringComparer)
+
+    # Create a list of existing values in the cACertificates attribute. We need to keep this at hand to determine if a Delete operation
+    # is attempting to remove the last value, in which case it needs to be replaced with a single value of \00 instead of deleted, as 
+    # the attribute is mandatory.
     $NTAuthCertificateList = [Dictionary[String, X509Certificate2]]::new($StringComparer)
-    $PreviousCACertificateHashMapping = [Dictionary[String, X509Certificate2]]::new($StringComparer) # Key = thumbprint in the Previous CA Certificate Hash extension; Value = the previous CA certificate
 
     $Assembly = "System.DirectoryServices.Protocols"
     Try
@@ -382,6 +386,10 @@ Process
             continue CACert
         }
 
+        # Add the certificate to the list.
+        $NTAuthCertificateList.Add($Cert.Thumbprint, $Cert)
+
+        # Check if the thumbprint is present in the whitelist.
         If (!$Whitelist.Contains($Cert.Thumbprint))
         {
             # The certificate is not present in the whitelist.
@@ -426,9 +434,25 @@ Process
 
     # We now have a list of CA certificates to remove from NTAuth. They can be removed by using the ModifyRequest class.
 
+    # Initialize a byte array with a single value. The value is always initialized to 0.
+    $NullValue = [Byte[]]::new(1)
+
     :NTAuth Foreach ($CACert in $CertificatesToRemove)
     {
-        $ModifyRequest = [ModifyRequest]::new($NTAuthDn, [DirectoryAttributeOperation]::Delete, $CertAttribute, $CACert.RawData)
+        $Operation = [DirectoryAttributeOperation]::Delete
+        $Value = $CACert.RawData
+
+        # If we are deleting the last certificate from NTAuth, we need to instead replace it with a null value. Attempting to delete
+        # the last value will otherwise cause an ObjectClassViolation error. 
+        If ($NTAuthCertificateList.Count -eq 1 -and $NTAuthCertificateList.ContainsKey($CACert.Thumbprint))
+        {
+            # If there is only one certificate left in the list, and that certificate matches the one we want to remove,
+            # we change the operation to Replace and the value to a single byte with value 0.
+            $Operation = [DirectoryAttributeOperation]::Replace
+            $Value = $NullValue
+        }
+
+        $ModifyRequest = [ModifyRequest]::new($NTAuthDn, $Operation, $CertAttribute, $Value)
         $Response = $null
 
         Try
@@ -455,6 +479,9 @@ Process
             Write-ScriptEvent @EventLogParams -EntryType Information -EventId CertificateRemoved `
                 -Message "A CA certificate with subject '{0}' ({1}) was successfully removed from NTAuth." `
                 -MessageParameters $CACert.Subject, $CACert.Thumbprint
+
+            # If the certificate was successfully removed, also remove it from the $NTAuthCertificateList variable.
+            $NTAuthCertificateList.Remove($CACert.Thumbprint)
         }
         Else
         {
@@ -462,7 +489,6 @@ Process
                 -Message "Failed to remove CA certificate with subject '{0}' ({1}) from NTAuth.`n`nResult code: {2}`nError message: {3}" `
                 -MessageParameters $CACert.Subject, $CACert.Thumbprint, $Response.ResultCode, $Response.ErrorMessage
         }
-
     }
 }
 End
