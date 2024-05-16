@@ -64,6 +64,7 @@ Begin
         AttributeValueError = 53
         ImplicitMappingFound = 59
         WhitelistEntryCleanupRecommended = 61
+        ScriptDisabled = 97
     }
     Function Write-ScriptEvent
     {
@@ -145,7 +146,6 @@ Begin
     $Assembly = "System.DirectoryServices.Protocols"
     Try
     {
-        
         Add-Type -AssemblyName $Assembly -ErrorAction Stop
     }
     Catch
@@ -283,9 +283,14 @@ Process
     # Create a list of CA certificates to remove from NTAuth
     $CertificatesToRemove = [List[X509Certificate2]]::new()
 
+    # The script will not perform any write actions unless this attribute is set on the NTAuthCertificates object. The attribute
+    # can have any value, as long as it is set.
+    # This allows administrators to enable and disable the script at will across all domain controllers.
+    $EnablingAttribute = "adminDisplayName"
+
     # Fetch the cACertificates attribute of the NTAuth object
     $CertAttribute = "cACertificate"
-    $NTAuthSearchRequest = [SearchRequest]::new($NTAuthDn, "(&(objectClass=certificationAuthority))", [SearchScope]::Base, $CertAttribute)
+    $NTAuthSearchRequest = [SearchRequest]::new($NTAuthDn, "(&(objectClass=certificationAuthority))", [SearchScope]::Base, $CertAttribute, $EnablingAttribute)
 
     Try
     {
@@ -308,6 +313,17 @@ Process
         throw
     }
     $NTAuth = $NTAuthSearchResponse.Entries[0]
+
+    # Check if the enabling attribute is present in the search result.
+    If (!$NTAuth.Attributes.Contains($EnablingAttribute))
+    {
+        # If the attribute is not present, do not execute any actions, but log an informational event indicating the situation.
+        Write-ScriptEvent @EventLogParams -EntryType Information -EventId ScriptDisabled `
+            -Message "The '{0}' attribute is not set on {1}. The script will not execute any actions until this attribute has a non-null value, and will continue logging this event until the attribute is set." `
+            -MessageParameters $EnablingAttribute, $NTAuthDn
+
+        throw
+    }
 
     # These checks are here for consistency purposes and future compatibility. The cACertificate attribute is mandatory, so by definition it can't be missing or empty.
 
