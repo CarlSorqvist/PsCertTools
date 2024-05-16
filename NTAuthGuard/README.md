@@ -6,6 +6,10 @@ NTAuth Guard provides a method of ensuring that the `NTAuthCertificates` object 
 
 The cleanup feature is performed by the `Invoke-NTAuthCleanup.ps1` script, which runs on domain controllers in the root domain of the forest through a scheduled task, triggered both by the 5136 event as well as every 5 minutes. To ensure least privilege, the task runs in the context of a group Managed Service Account (gMSA) that is granted permission to write only to the `cACertificate` attribute of the `NTAuthCertificates` object.
 
+## Overview
+
+![image](https://github.com/CarlSorqvist/PsCertTools/assets/112415522/594f3871-9cd4-49be-9ff7-a6f823d0a0fd)
+
 ## Components
 
 * `Create-Gmsa.ps1` creates a gMSA for running the task.
