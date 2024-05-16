@@ -22,6 +22,7 @@ By default, the script logs its actions, warnings and errors to the `Application
 # Installation
 
 **Important**
+
 The script is designed to not execute any actions until explicitly enabled. To enable the script, set the `adminDisplayName` attribute of the `NTAuthCertificates` object to any non-null value. If you already have a value for this attribute in your environment that you do not wish to remove, consider modifying the `$EnablingAttribute` variable in `Invoke-NTAuthCleanup.ps1` to a different, writable and otherwise unused attribute. It is important that all versions of the script file uses the same attribute, or you will encounter unexpected behavior.
 
 * Create the gMSA by running the `Create-Gmsa.ps1` script on a server in the forest root domain, or create it manually. If you use the script, update the `$FQDN` variable before running it. By default, the account is named `s0ntauthguard`, which is used in the rest of the scripts as well. The script automatically allows the `Domain Controllers` group access to the service account.
