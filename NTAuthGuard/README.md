@@ -34,7 +34,7 @@ The script is designed to not execute any actions until explicitly enabled. To e
 * Create a delegation group that will be used to delegate `WriteProperty`  rights to the `cACertificate` attribute of the `NTAuthCertificates` object. By default, this group is named `d0_pki_ntauth_cacert__w`. **Take care** that this group cannot be modified by anyone else than Enterprise Admins.
 * Add the service account as a member of the newly created delegation group.
 * Update the group name in the `NTAuthDelegation.ps1` script if necessary, then run it. It will ask for confirmation before attempting to update the security descriptor of `NTAuthCertificates`.
-* Create a new folder named NTAuth in the NETLOGON folder of the forest root domain, for example `\\domain.com\NETLOGON\NTAuth`.
+* Create a new folder named `NTAuth` in the `NETLOGON` folder of the forest root domain, for example `\\domain.com\NETLOGON\NTAuth`.
 * Copy the `Invoke-NTAuthCleanup.ps1` script to the previously created `NETLOGON\NTAuth` folder.
 * Create the whitelist file by opening notepad and saving it (with UTF-8 encoding) in the same `NETLOGON\NTAuth` folder as `whitelist.txt`. The whitelist should contain the thumbprints of each individual CA certificate **that you wish to keep in NTAuth**, one per row. Example:
 
@@ -63,7 +63,7 @@ $WhiteListPath = "\\corp.contoso.com\netlogon\NTAuth\whitelist.txt"
 ```
 
 * Create a GPO that will run `Create-NTAuthGuardTask.ps1` as a Startup script, name it according to your naming convention, for example `Tier0.DomainControllers.NTAuthGuard`. Add the modified `Create-NTAuthGuardTask.ps1` script to Startup scripts.
-* Link the GPO to the Domain Controllers OU.
+* Scope the GPO to the `Domain Controllers` group, then link it to the Domain Controllers OU. It is important that you do **not** scope the GPO to the default `Authenticated Users`, as it will also apply to RODCs if you do so.
 * Optionally, enable [Audit Directory Service Changes](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/audit-directory-service-changes) on all domain controllers. The script does not require you to, as it will run every 5 minutes anyway, but doing so enables a more immediate response, minimizing impact if an unwanted CA certificate is added.
 * Run gpupdate /force on a DC and reboot it. Verify that the `NTAuth Guard` task was created successfully. Do the same with all other DCs.
 * When all domain controllers have been rebooted and you have verified that event 97 is logged on all of them (indicating that the script is prevented from taking action), enable the script by assigning any non-null value to the `adminDisplayName` attribute of the `NTAuthCertificates` object. You can use the following PowerShell command to assign the value `1` to `adminDisplayName`:
