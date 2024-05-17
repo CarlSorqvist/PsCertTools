@@ -63,7 +63,7 @@ $WhiteListPath = "\\corp.contoso.com\netlogon\NTAuth\whitelist.txt"
 ```
 
 * Create a GPO that will run `Create-NTAuthGuardTask.ps1` as a Startup script, name it according to your naming convention, for example `Tier0.DomainControllers.NTAuthGuard`. Add the modified `Create-NTAuthGuardTask.ps1` script to Startup scripts.
-* Scope the GPO to the `Domain Controllers` group, then link it to the Domain Controllers OU. It is important that you do **not** scope the GPO to the default `Authenticated Users`, as it will also apply to RODCs if you do so.
+* Scope the GPO to the `Domain Controllers` group, then link it to the `Domain Controllers` OU. It is important that you do **not** scope the GPO to the default `Authenticated Users`, as it will also apply to RODCs if you do so.
 * Optionally, enable [Audit Directory Service Changes](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/audit-directory-service-changes) on all domain controllers. The script does not require you to, as it will run every 5 minutes anyway, but doing so enables a more immediate response, minimizing impact if an unwanted CA certificate is added.
 * Run gpupdate /force on a DC and reboot it. Verify that the `NTAuth Guard` task was created successfully. Do the same with all other DCs.
 * When all domain controllers have been rebooted and you have verified that event 97 is logged on all of them (indicating that the script is prevented from taking action), enable the script by assigning any non-null value to the `adminDisplayName` attribute of the `NTAuthCertificates` object. You can use the following PowerShell command to assign the value `1` to `adminDisplayName`:
