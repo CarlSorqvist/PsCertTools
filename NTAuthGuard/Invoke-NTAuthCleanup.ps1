@@ -128,9 +128,9 @@ Begin
 
     # Since this script is triggered by an event by default, we need to account for cases where multiple certificates are added at once (for example,
     # through a Replace operation, where each replaced value is logged as an added entry). If the task is triggered multiple times through multiple events, 
-    # we need to throttle it by introducing a short delay before the script executes.
+    # we need to throttle it by introducing a short delay before it executes.
 
-    Start-Sleep -Seconds 2
+    Start-Sleep -Seconds 5
 
     $NTAuthContainerDnTemplate = 'CN=NTAuthCertificates,CN=Public Key Services,CN=Services,{0}'
     $PreviousCACertificateHashExtensionOID = "1.3.6.1.4.1.311.21.2"

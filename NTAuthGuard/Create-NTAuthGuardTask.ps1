@@ -76,7 +76,7 @@ If (!$TaskExists)
     $EventTrigger.Enabled = $true
 
     # Set the execution time limit to 1 minute, and allow new instances to be queued
-    $Settings = New-ScheduledTaskSettingsSet -Compatibility Win8 -ExecutionTimeLimit ([TimeSpan]::new(0, 1, 0)) -MultipleInstances Queue
+    $Settings = New-ScheduledTaskSettingsSet -Compatibility Win8 -ExecutionTimeLimit ([TimeSpan]::new(0, 1, 0)) -MultipleInstances IgnoreNew
 
     # Register the scheduled task
     Register-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Principal $Principal -Action $Action -Settings $Settings -Trigger $DailyTrigger, $EventTrigger 
