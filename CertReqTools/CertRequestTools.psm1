@@ -322,6 +322,221 @@ Function ConvertTo-Pem
         $StringBuilder.ToString()
     }
 }
+Function Export-PrivateKey
+{
+    [CmdletBinding(DefaultParameterSetName = "FromCertificate")]
+    [OutputType([String])]
+    Param
+    (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true, ParameterSetName = "FromCertificate")]
+        [Alias("Cert")]
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]
+        $Certificate
+
+        # Uses the thumbprint of the provided certificate as the file name for the private key, instead of the Subject Key Identifier.
+        , [Parameter(Mandatory = $false, ParameterSetName = "FromCertificate")]
+        [Switch]
+        $UseThumbprintForFilename
+
+        , [Parameter(Mandatory = $true, ValueFromPipeline = $true, ParameterSetName = "FromRequestAndKey")]
+        [CertificateRequestAndKey]
+        $RequestAndKey
+
+        , [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true, ParameterSetName = "FromPrivateKey")]
+        [Alias("Key")]
+        [System.Security.Cryptography.CngKey]
+        $PrivateKey
+
+        # Specifies the directory where the exported private key(s) will be saved.
+        , [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()]
+        [String]
+        $OutputDirectory
+
+        # Displays a SaveFileDialog prompt for each exported key.
+        , [Parameter(Mandatory = $false)]
+        [Switch]
+        $ShowFileDialog
+    )
+    Begin
+    {
+        $Header = "-----BEGIN PRIVATE KEY-----"
+        $Footer = "-----END PRIVATE KEY-----"
+        $SHA1 = [System.Security.Cryptography.SHA1]::Create()
+
+        $TargetPath = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
+
+        If ([String]::IsNullOrWhiteSpace($OutputDirectory))
+        {
+            "No output directory was specified; defaulting to '{0}'" -f $TargetPath | Write-Warning
+        }
+        Else
+        {
+            If (![System.IO.Directory]::Exists($OutputDirectory))
+            {
+                "Attempting to create directory '{0}'..." -f $OutputDirectory | Write-Verbose
+                Try
+                {
+                    [Void][System.IO.Directory]::CreateDirectory($OutputDirectory)
+                }
+                Catch
+                {
+                    "Failed to create output directory '{0}', defaulting to user Desktop '{1}'" -f $OutputDirectory, $TargetPath | Write-Warning
+                }
+            }
+            $TargetPath = $OutputDirectory
+        }
+    }
+    Process
+    {
+        $CngKey = $null
+
+        If ($PSCmdlet.ParameterSetName -ieq "FromCertificate")
+        {
+            If (!$Certificate.HasPrivateKey)
+            {
+                $Message = "The provided certificate does not have a private key associated with it. Thumbprint: {0}" -f $Certificate.Thumbprint
+                $Ex = [System.InvalidOperationException]::new($Message)
+                Write-Error -Exception $Ex
+                return
+            }
+            If ($Certificate.PublicKey.Oid.Value -eq "1.2.840.113549.1.1.1") # RSA
+            {
+                $CngKey = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($Certificate).Key
+            }
+            ElseIf ($Certificate.PublicKey.Oid.Value -eq "1.2.840.10045.2.1") # ECC
+            {
+                $CngKey = [System.Security.Cryptography.X509Certificates.ECDsaCertificateExtensions]::GetECDsaPrivateKey($Certificate).Key
+            }
+            Else
+            {
+                $Message = "The provided certificate has an unsupported key type. Only RSA and ECC certificates are supported."
+                $Ex = [System.NotSupportedException]::new($Message)
+                Write-Error -Exception $Ex
+                return
+            }
+        }
+        ElseIf ($PSCmdlet.ParameterSetName -ieq "FromRequestAndKey")
+        {
+            If ($RequestAndKey.Key -is [System.Security.Cryptography.RSACng])
+            {
+                $CngKey = ([System.Security.Cryptography.RSACng]$RequestAndKey.Key).Key
+            }
+            ElseIf ($RequestAndKey.Key -is [System.Security.Cryptography.ECDsaCng])
+            {
+                $CngKey = ([System.Security.Cryptography.ECDsaCng]$RequestAndKey.Key).Key
+            }
+            Else
+            {
+                $Message = "The input object is of type '{0}' - the only supported types are ECDsaCng and RSACng." -f $RequestAndKey.Key.GetType().FullName
+                $Ex = [System.NotSupportedException]::new($Message)
+                Write-Error -Exception $Ex
+                return
+            }
+        }
+        Else
+        {
+            $CngKey = $PrivateKey
+        }
+
+        $ExportFlag = [System.Security.Cryptography.CngExportPolicies]::AllowPlaintextExport
+        If (!$CngKey.ExportPolicy.HasFlag($ExportFlag))
+        {
+            $Message = "The provided private key does not allow plaintext key export. ExportPolicy: {0}" -f $CngKey.ExportPolicy
+            If ($PSCmdlet.ParameterSetName -ieq "FromCertificate")
+            {
+                $Message = "{0}; Thumbprint: {1}" -f $Message, $Certificate.Thumbprint
+            }
+            $Ex = [System.InvalidOperationException]::new($Message)
+            Write-Error -Exception $Ex
+            return
+        }
+
+        $ExportedKey = $null
+
+        Try
+        {
+            $ExportedKey = $CngKey.Export([System.Security.Cryptography.CngKeyBlobFormat]::Pkcs8PrivateBlob)
+        }
+        Catch
+        {
+            Write-Error -ErrorRecord $_
+            return
+        }
+
+        $Extension = "key"
+
+        If ($UseThumbprintForFilename)
+        {
+            $Filename = "{0}.{1}" -f $Certificate.Thumbprint, $Extension
+        }
+        Else
+        {
+            # We use the X509SignatureGenerator to compute the public key from the private key. The public key is then
+            # used to compute the Subject Key Identifier, which is subsequently used to create the filename.
+
+            $Generator = $null
+            If ($CngKey.AlgorithmGroup -eq [System.Security.Cryptography.CngAlgorithmGroup]::Rsa)
+            {
+                $Generator = [System.Security.Cryptography.X509Certificates.X509SignatureGenerator]::CreateForRSA([System.Security.Cryptography.RSACng]::new($CngKey), [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+            }
+            ElseIf ($CngKey.AlgorithmGroup -eq [System.Security.Cryptography.CngAlgorithmGroup]::ECDsa -or $CngKey.AlgorithmGroup -eq [System.Security.Cryptography.CngAlgorithmGroup]::ECDiffieHellman)
+            {
+                $Generator = [System.Security.Cryptography.X509Certificates.X509SignatureGenerator]::CreateForECDsa([System.Security.Cryptography.ECDsaCng]::new($CngKey))
+            }
+            Else
+            {
+                # This covers when the FromPrivateKey parameter set is used and the private key was of an unsupported algorithm
+                $Message = "The provided private key is of an unsupported algorithm. Only RSA and ECC keys are supported."
+                $Ex = [System.NotSupportedException]::new($Message)
+                Write-Error -Exception $Ex
+                return
+            }
+
+            # Compute the Subject Key Identifier (SHA1 hash of the public key)
+            $SKI = [System.BitConverter]::ToString($SHA1.ComputeHash($Generator.PublicKey.EncodedKeyValue.RawData)) -replace "-",""
+        
+            $Filename = "SKI({0}).{1}" -f $SKI, $Extension
+        }
+
+        $OutputFilename = $null
+        If ($ShowFileDialog)
+        {
+            $SFD = [System.Windows.Forms.SaveFileDialog]::new()
+            $SFD.Title = "Save private key"
+            $SFD.AddExtension = $true
+            $SFD.DefaultExt = $Extension
+            $SFD.FileName = $Filename
+            $SFD.InitialDirectory = $TargetPath
+            $SFD.RestoreDirectory = $true
+            $SFD.OverwritePrompt = $true
+            $SFD.Filter = "X509 private key (*.key)|*.key"
+            If ($SFD.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK)
+            {
+                $Message = "User cancelled out of file dialog, aborting"
+                $Ex = [System.NotSupportedException]::new($Message)
+                $PSCmdlet.ThrowTerminatingError([System.Management.Automation.ErrorRecord]::new($Ex, "PipelineAborted", [System.Management.Automation.ErrorCategory]::OperationStopped, $null))
+            }
+            Else
+            {
+                $OutputFilename = $SFD.FileName
+            }
+        }
+        Else
+        {
+            $OutputFilename = [System.IO.Path]::Combine($TargetPath, $Filename)
+        }
+
+        $Result = [System.Text.StringBuilder]::new().
+            AppendLine($Header).
+            Append([Convert]::ToBase64String($ExportedKey, [System.Base64FormattingOptions]::InsertLineBreaks)).
+            AppendLine().
+            AppendLine($Footer).ToString()
+        
+        [System.IO.File]::WriteAllText($OutputFilename, $Result, [System.Text.Encoding]::ASCII)
+        [System.IO.FileInfo]::new($OutputFilename)
+    }
+}
 
 Function Get-ExtendedKeyUsage
 {
@@ -395,7 +610,7 @@ Function Get-CAConfigString
     [CmdletBinding(DefaultParameterSetName = "Select")]
     [OutputType([String])]
     Param(
-        [Parameter(Mandatory = $false, ValueFromPipelineByPropertyName = $true, ParameterSetName = "Lookup")]
+        [Parameter(Mandatory = $false, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true, ParameterSetName = "Lookup")]
         [Alias("Name","DnsHostName")]
         [String]
         $ComputerName
@@ -485,10 +700,6 @@ Function Export-CertificateToPfx
         , [Parameter(Mandatory = $true, ParameterSetName = "Generate")]
         [Switch]
         $GeneratePassword
-
-        , [Parameter(Mandatory = $false)]
-        [Microsoft.CertificateServices.Commands.CryptoAlgorithmOptions]
-        $EncryptionAlgorithm = [Microsoft.CertificateServices.Commands.CryptoAlgorithmOptions]::AES256_SHA256
     )
     Process
     {
@@ -556,7 +767,7 @@ Function Export-CertificateToPfx
         $Properties = @{
             FilePath = $OutputFilename
             ChainOption = $ChainOption
-            CryptoAlgorithmOption = $EncryptionAlgorithm
+            CryptoAlgorithmOption = [Microsoft.CertificateServices.Commands.CryptoAlgorithmOptions]::AES256_SHA256
             Force = $true
         }
         $Credential = $null
