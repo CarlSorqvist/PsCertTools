@@ -29,6 +29,8 @@ By default, the script logs its actions, warnings and errors to the `Application
 
 The script is designed to not execute any actions until explicitly enabled. To enable the script, set the `adminDisplayName` attribute of the `NTAuthCertificates` object to any non-null value. If you already have a value for this attribute in your environment that you do not wish to remove, consider modifying the `$EnablingAttribute` variable in `Invoke-NTAuthCleanup.ps1` to a different, writable and otherwise unused attribute. It is important that all versions of the script file uses the same attribute, or you will encounter unexpected behavior.
 
+Also note that by default, the script is in **audit mode**. This means that when the `adminDisplayName` attribute is set to a non-null value, an event is logged if a non-whitelisted certificate is found in NTAuth, but the certificate is not removed. To enable production mode, set the value of `adminDisplayName` to `-1` (default).
+
 * Create the gMSA by running the `Create-Gmsa.ps1` script on a server in the forest root domain, or create it manually. If you use the script, update the `$FQDN` variable before running it. By default, the account is named `s0ntauthguard`, which is used in the rest of the scripts as well. The script automatically allows the `Domain Controllers` group access to the service account.
 * The gMSA is created in the default `Managed Service Accounts` container. If you have an OU specifically for Tier0 service accounts, you can optionally move it.
 * Create a delegation group that will be used to delegate `WriteProperty`  rights to the `cACertificate` attribute of the `NTAuthCertificates` object. By default, this group is named `d0_pki_ntauth_cacert__w`. **Take care** that this group cannot be modified by anyone else than Enterprise Admins.
@@ -66,12 +68,16 @@ $WhiteListPath = "\\corp.contoso.com\netlogon\NTAuth\whitelist.txt"
 * Scope the GPO to the `Domain Controllers` group, then link it to the `Domain Controllers` OU. It is important that you do **not** scope the GPO to the default `Authenticated Users`, as it will also apply to RODCs if you do so.
 * Optionally, enable [Audit Directory Service Changes](https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/auditing/audit-directory-service-changes) on all domain controllers. The script does not require you to, as it will run every 5 minutes anyway, but doing so enables a more immediate response, minimizing impact if an unwanted CA certificate is added.
 * Run gpupdate /force on a DC and reboot it. Verify that the `NTAuth Guard` task was created successfully. Do the same with all other DCs.
-* When all domain controllers have been rebooted and you have verified that event 97 is logged on all of them (indicating that the script is prevented from taking action), enable the script by assigning any non-null value to the `adminDisplayName` attribute of the `NTAuthCertificates` object. You can use the following PowerShell command to assign the value `1` to `adminDisplayName`:
+* When all domain controllers have been rebooted and you have verified that event 97 is logged on all of them (indicating that the script is prevented from taking action), enable the script by assigning a value to the `adminDisplayName` attribute of the `NTAuthCertificates` object. You can use the following PowerShell command to assign the value `1` to `adminDisplayName`:
 
 ```
 Set-ADObject -Identity ('CN=NTAuthCertificates,CN=Public Key Services,CN=Services,{0}' -f (Get-ADRootDSE).configurationNamingContext) -Replace @{adminDisplayName="1"}
 ```
+* By default, the script is in audit mode. To enable production mode, set the value of the `adminDisplayName` attribute to `-1`. The following command can be used to assign this value:
 
+```
+Set-ADObject -Identity ('CN=NTAuthCertificates,CN=Public Key Services,CN=Services,{0}' -f (Get-ADRootDSE).configurationNamingContext) -Replace @{adminDisplayName="-1"}
+```
 ## Testing
 
 To verify that the task triggers as expected, you can add a test certificate to the NTAuth container through the following `certutil` command:
