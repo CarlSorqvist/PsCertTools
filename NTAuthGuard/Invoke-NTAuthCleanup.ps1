@@ -46,6 +46,7 @@ Begin
 {
     enum Events
     {
+        NonWhitelistedCertificateAuditMode = 0
         CertificateRemoved = 1
         ModifyRequestFailed = 3
         ModifyRequestException = 5
@@ -292,6 +293,10 @@ Process
     # This allows administrators to enable and disable the script at will across all domain controllers.
     $EnablingAttribute = "adminDisplayName"
 
+    # If the value of the enabling attribute matches this value, the full functionality of the script is enabled. Otherwise,
+    # it is limited to audit mode.
+    $ProductionModeValue = "-1"
+
     # Fetch the cACertificates attribute of the NTAuth object
     $CertAttribute = "cACertificate"
     $NTAuthSearchRequest = [SearchRequest]::new($NTAuthDn, "(&(objectClass=certificationAuthority))", [SearchScope]::Base, $CertAttribute, $EnablingAttribute)
@@ -327,6 +332,19 @@ Process
             -MessageParameters $EnablingAttribute, $NTAuthDn
 
         throw
+    }
+
+    # The script is set to audit mode by default, in which case it only logs an event instead of removing entries from NTAuth.
+    # Audit mode is disabled by setting the value of the enabling attribute to a certain value.
+    $AuditMode = $true
+
+    # Process the value of the enabling attribute to determine if we are in audit mode. If the value is -1, audit mode is enabled.
+    $EnablingAttributeValue = [String]$NTAuth.Attributes[$EnablingAttribute].GetValues([String])[0]
+
+    If ($EnablingAttributeValue -ieq $ProductionModeValue)
+    {
+        # If the value of the enabling attribute matches the value in $ProductionModeValue, set audit mode to $false. This effectively enables the full functionality of the script.
+        $AuditMode = $false
     }
 
     # These checks are here for consistency purposes and future compatibility. The cACertificate attribute is mandatory, so by definition it can't be missing or empty.
@@ -439,55 +457,64 @@ Process
 
     :NTAuth Foreach ($CACert in $CertificatesToRemove)
     {
-        $Operation = [DirectoryAttributeOperation]::Delete
-        $Value = $CACert.RawData
-
-        # If we are deleting the last certificate from NTAuth, we need to instead replace it with a null value. Attempting to delete
-        # the last value will otherwise cause an ObjectClassViolation error. 
-        If ($NTAuthCertificateList.Count -eq 1 -and $NTAuthCertificateList.ContainsKey($CACert.Thumbprint))
+        If ($AuditMode)
         {
-            # If there is only one certificate left in the list, and that certificate matches the one we want to remove,
-            # we change the operation to Replace and the value to a single byte with value 0.
-            $Operation = [DirectoryAttributeOperation]::Replace
-            $Value = $NullValue
-        }
-
-        $ModifyRequest = [ModifyRequest]::new($NTAuthDn, $Operation, $CertAttribute, $Value)
-        $Response = $null
-
-        Try
-        {
-            $Response = [ModifyResponse]$Ldap.SendRequest($ModifyRequest)
-        }
-        Catch [DirectoryOperationException]
-        {
-            $Response = $_.Exception.GetBaseException().Response
-        }
-        Catch
-        {
-            $Ex = $_.Exception.GetBaseException()
-
-            $_ | Write-ScriptEvent @EventLogParams -EntryType Error -EventId ModifyRequestException `
-                -Message "An exception of type {0} was raised while attempting to remove certificate '{1}' ({2}) from NTAuth. The following exception message was reported: '{3}'" `
-                -MessageParameters $Ex.GetType().Name, $CACert.Subject, $CACert.Thumbprint, $Ex.Message
-
-            continue NTAuth
-        }
-
-        If ($Response.ResultCode -eq [ResultCode]::Success)
-        {
-            Write-ScriptEvent @EventLogParams -EntryType Information -EventId CertificateRemoved `
-                -Message "A CA certificate with subject '{0}' ({1}) was successfully removed from NTAuth." `
-                -MessageParameters $CACert.Subject, $CACert.Thumbprint
-
-            # If the certificate was successfully removed, also remove it from the $NTAuthCertificateList variable.
-            $NTAuthCertificateList.Remove($CACert.Thumbprint)
+            Write-ScriptEvent @EventLogParams -EntryType Warning -EventId NonWhitelistedCertificateAuditMode `
+                -Message "[Audit mode] A CA certificate with subject '{0}' ({1}) is published in NTAuth. The certificate is not included in the whitelist and should be removed.`n`nTo enable the full functionality of the script, set the value of the {2} attribute to '{3}'." `
+                -MessageParameters $CACert.Subject, $CACert.Thumbprint, $EnablingAttribute, $ProductionModeValue
         }
         Else
         {
-            Write-ScriptEvent @EventLogParams -EntryType Warning -EventId ModifyRequestFailed `
-                -Message "Failed to remove CA certificate with subject '{0}' ({1}) from NTAuth.`n`nResult code: {2}`nError message: {3}" `
-                -MessageParameters $CACert.Subject, $CACert.Thumbprint, $Response.ResultCode, $Response.ErrorMessage
+            $Operation = [DirectoryAttributeOperation]::Delete
+            $Value = $CACert.RawData
+
+            # If we are deleting the last certificate from NTAuth, we need to instead replace it with a null value. Attempting to delete
+            # the last value will otherwise cause an ObjectClassViolation error. 
+            If ($NTAuthCertificateList.Count -eq 1 -and $NTAuthCertificateList.ContainsKey($CACert.Thumbprint))
+            {
+                # If there is only one certificate left in the list, and that certificate matches the one we want to remove,
+                # we change the operation to Replace and the value to a single byte with value 0.
+                $Operation = [DirectoryAttributeOperation]::Replace
+                $Value = $NullValue
+            }
+
+            $ModifyRequest = [ModifyRequest]::new($NTAuthDn, $Operation, $CertAttribute, $Value)
+            $Response = $null
+
+            Try
+            {
+                $Response = [ModifyResponse]$Ldap.SendRequest($ModifyRequest)
+            }
+            Catch [DirectoryOperationException]
+            {
+                $Response = $_.Exception.GetBaseException().Response
+            }
+            Catch
+            {
+                $Ex = $_.Exception.GetBaseException()
+
+                $_ | Write-ScriptEvent @EventLogParams -EntryType Error -EventId ModifyRequestException `
+                    -Message "An exception of type {0} was raised while attempting to remove certificate '{1}' ({2}) from NTAuth. The following exception message was reported: '{3}'" `
+                    -MessageParameters $Ex.GetType().Name, $CACert.Subject, $CACert.Thumbprint, $Ex.Message
+
+                continue NTAuth
+            }
+
+            If ($Response.ResultCode -eq [ResultCode]::Success)
+            {
+                Write-ScriptEvent @EventLogParams -EntryType Information -EventId CertificateRemoved `
+                    -Message "A CA certificate with subject '{0}' ({1}) was successfully removed from NTAuth." `
+                    -MessageParameters $CACert.Subject, $CACert.Thumbprint
+
+                # If the certificate was successfully removed, also remove it from the $NTAuthCertificateList variable.
+                $NTAuthCertificateList.Remove($CACert.Thumbprint)
+            }
+            Else
+            {
+                Write-ScriptEvent @EventLogParams -EntryType Warning -EventId ModifyRequestFailed `
+                    -Message "Failed to remove CA certificate with subject '{0}' ({1}) from NTAuth.`n`nResult code: {2}`nError message: {3}" `
+                    -MessageParameters $CACert.Subject, $CACert.Thumbprint, $Response.ResultCode, $Response.ErrorMessage
+            }
         }
     }
 }
