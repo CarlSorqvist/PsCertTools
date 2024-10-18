@@ -88,7 +88,16 @@ Function New-PrivateKey
         Else
         {
             # Persistent key, stored in the selected provider
-            $Key = [System.Security.Cryptography.CngKey]::Create($Algorithm, $KeyName, $KeyParams)
+            Try
+            {
+                $Key = [System.Security.Cryptography.CngKey]::Create($Algorithm, $KeyName, $KeyParams)
+            }
+            Catch
+            {
+                $Ex = $_.Exception.GetBaseException()
+                "Failed to create key: {0}" -f $Ex.Message | Write-Error
+                return
+            }
         }
         If ($PSCmdlet.ParameterSetName -eq "RSA")
         {
