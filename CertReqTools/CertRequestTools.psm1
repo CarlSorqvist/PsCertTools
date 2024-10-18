@@ -1,4 +1,4 @@
-﻿#Requires -version 5 -runasadministrator
+﻿#Requires -version 5
 
 Function New-PrivateKey
 {
@@ -70,6 +70,10 @@ Function New-PrivateKey
     {
         If ($MachineKey)
         {
+            If (![DebugHelper]::IsAdmin)
+            {
+                "Machine keys generally require Administrator permissions. Ensure you are running in an elevated session if you intend to save this key in the LocalMachine store." | Write-Warning
+            }
             $KeyParams.KeyCreationOptions = $KeyParams.KeyCreationOptions -bor [System.Security.Cryptography.CngKeyCreationOptions]::MachineKey
         }
         If ($OverwriteExistingKey)
@@ -1065,6 +1069,10 @@ Function Install-Certificate
     )
     Begin
     {
+        If ($Location -eq [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine -and ![DebugHelper]::IsAdmin)
+        {
+            "Administrative privileges may be required to add certificates to the local machine store." | Write-Warning
+        }
         $Store = [System.Security.Cryptography.X509Certificates.X509Store]::new($Name, $Location)
         $Store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::OpenExistingOnly -bor [System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
     }
@@ -1099,7 +1107,15 @@ Function Install-Certificate
                     return
                 }
             }
-            $Store.Add($Certificate)
+            Try
+            {
+                $Store.Add($Certificate)
+            }
+            Catch
+            {
+                $Ex = $_.Exception.GetBaseException()
+                "Failed to add certificate {0} to store: {1}" -f $Certificate.Thumbprint, $Ex.Message | Write-Error
+            }
         }
     }
     End

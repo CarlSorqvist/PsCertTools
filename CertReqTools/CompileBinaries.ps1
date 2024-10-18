@@ -731,6 +731,10 @@ public static class CollectionUtil
 public static class DebugHelper
 {
     public static bool DebugOutput = false;
+    public static bool IsAdmin { get { return IsElevated; } }
+    
+    private static readonly WindowsPrincipal CurrentPrincipal = new WindowsPrincipal(WindowsIdentity.GetCurrent());
+    private static readonly bool IsElevated = CurrentPrincipal.IsInRole(WindowsBuiltInRole.Administrator);
 
     private const String DateFormat = "yyyy-MM-dd HH:mm:ss.fff";
     private const String MessageFormat = "[{0}] {1}";
@@ -1010,6 +1014,13 @@ public abstract class StandardExtensionsCmdletBase
     [ValidateNotNullOrEmpty()]
     public String[] UserPrincipalName;
 
+    [Parameter(Mandatory = false)]
+    [ValidateNotNullOrEmpty()]
+    public SecurityIdentifier Sid;
+
+    // Used to generate the SID URI in the SAN extension.
+    protected readonly String SidUriFormat = "tag:microsoft.com,2022-09-14:sid:{0}";
+
     // This method is used to inform the user that certain parameters have no meaning in certain conditions.
     // For example, if the result of New-CertificateRequest is passed via pipeline to Submit-CertificateRequest,
     // none of the parameters herein are useful as they need to be defined in the first call to New-CertificateRequest.
@@ -1047,14 +1058,23 @@ public abstract class StandardExtensionsCmdletBase
                         if (Regex.IsMatch(oidString, "^\\d(\\.\\d+)+$"))
                         {
                             // String is a dotted OID string
-                            ekuCollection.Add(new Oid(oidString));
+                            var o = new Oid(oidString);
+                            WriteVerboseEx("Adding EKU {0} ('{1}') to request", o.Value, String.IsNullOrEmpty(o.FriendlyName) ? "<unknown>" : o.FriendlyName);
+                            ekuCollection.Add(o);
                         }
                         else
                         {
                             // String is literal. Do a wildcard match against the OID lookup list
                             // Possible future enhancement: save each individual wildcard pattern together with its result in a dictionary, and return the saved result if it is found
-                            foreach (var entry in X509Extensions.ExtendedKeyUsage.FindMatchingOids(oidString))
+
+                            // Get all matching OIDs and write a warning if there were no matches
+                            var matchingOids = X509Extensions.ExtendedKeyUsage.FindMatchingOids(oidString);
+                            if (matchingOids.Count == 0)
+                                WriteWarningEx("Could not find an OID matching the friendly name '{0}'. Either use the dotted numerical OID, or use the Get-ExtendedKeyUsage cmdlet to find a matching OID.", oidString);
+
+                            foreach (var entry in matchingOids)
                             {
+                                WriteVerboseEx("Adding EKU {0} ('{1}') to request", entry.Value, entry.FriendlyName);
                                 ekuCollection.Add(entry);
                             }
                         }
@@ -1070,6 +1090,11 @@ public abstract class StandardExtensionsCmdletBase
         return false;
     }
 
+    protected Uri GenerateSidUri(SecurityIdentifier sid)
+    {
+        return new Uri(String.Format(SidUriFormat, sid.Value));
+    }
+
     protected bool BuildSan(out X509Extension san)
     {
         var parameters = MyInvocation.BoundParameters;
@@ -1080,6 +1105,7 @@ public abstract class StandardExtensionsCmdletBase
         {
             foreach (var value in DnsName)
             {
+                WriteVerboseEx("Adding DNS name '{0}' to request", value);
                 sanBuilder.AddDnsName(value);
             }
             hasContent = true;
@@ -1088,6 +1114,7 @@ public abstract class StandardExtensionsCmdletBase
         {
             foreach (var value in EmailAddress)
             {
+                WriteVerboseEx("Adding email address '{0}' to request", value);
                 sanBuilder.AddEmailAddress(value);
             }
             hasContent = true;
@@ -1096,6 +1123,7 @@ public abstract class StandardExtensionsCmdletBase
         {
             foreach (var value in IPAddress)
             {
+                WriteVerboseEx("Adding IP address '{0}' to request", value);
                 sanBuilder.AddIpAddress(value);
             }
             hasContent = true;
@@ -1104,6 +1132,7 @@ public abstract class StandardExtensionsCmdletBase
         {
             foreach (var value in Uri)
             {
+                WriteVerboseEx("Adding URI '{0}' to request", value);
                 sanBuilder.AddUri(value);
             }
             hasContent = true;
@@ -1112,8 +1141,15 @@ public abstract class StandardExtensionsCmdletBase
         {
             foreach (var value in UserPrincipalName)
             {
+                WriteVerboseEx("Adding user principal name '{0}' to request", value);
                 sanBuilder.AddUserPrincipalName(value);
             }
+            hasContent = true;
+        }
+        if (parameters.ContainsKey("Sid"))
+        {
+            WriteVerboseEx("Adding security identifier '{0}' to request", Sid.Value);
+            sanBuilder.AddUri(GenerateSidUri(Sid));
             hasContent = true;
         }
         san = hasContent ? sanBuilder.Build(false) : null;
@@ -1148,9 +1184,15 @@ public class NewCertificateRequestCommand
 
         CertificateRequest request = null;
         if (PrivateKey is ECDsa)
+        {
+            WriteVerboseEx("Creating new X509 certificate request using a {0} {1} key", PrivateKey.GetType().Name, PrivateKey.KeySize);
             request = new CertificateRequest(Subject, (ECDsa)PrivateKey, HashAlgorithm);
+        }
         else
+        {
+            WriteVerboseEx("Creating new X509 certificate request using a RSA{0} key", ((RSA)PrivateKey).KeySize);
             request = new CertificateRequest(Subject, (RSA)PrivateKey, HashAlgorithm, rsaPadding);
+        }
 
         // If there is no defined KeyUsage, add a default one based on the private key algorithm
         if (!parameters.ContainsKey("KeyUsage"))
@@ -1169,6 +1211,7 @@ public class NewCertificateRequestCommand
             else
                 KeyUsage |= System.Security.Cryptography.X509Certificates.X509KeyUsageFlags.KeyEncipherment;
         }
+        WriteVerboseEx("Adding KeyUsage extension with value {0} to request", KeyUsage);
         request.CertificateExtensions.Add(new X509KeyUsageExtension(KeyUsage, false));
 
         // Add EKUs
@@ -1190,6 +1233,7 @@ public class NewCertificateRequestCommand
         {
             foreach (var extension in OtherExtension)
             {
+                WriteVerboseEx("Adding custom extension {0} ({1}) to request", extension.Oid.Value, String.IsNullOrEmpty(extension.Oid.FriendlyName) ? "<unknown>" : extension.Oid.FriendlyName);
                 request.CertificateExtensions.Add(extension);
             }
         }
@@ -1237,12 +1281,15 @@ public class SubmitCertificateRequestCommand
     // Helper method that creates a SubmissionResult with the private key.
     protected SubmissionResult GetCertificate(CCertRequestClass request, AsymmetricAlgorithm key)
     {
+        WriteVerboseEx("Retrieving issued certificate");
         var b64cert = request.GetCertificate(1); // 1 = CR_OUT_BASE64
         var cert = new X509Certificate2(Convert.FromBase64String(b64cert));
 
         // Reserve the use of Disposition for future purposes
         if (key != null)
         {
+            WriteVerboseEx("Combining certificate and private key");
+
             X509Certificate2 certWithKey = null;
             if (key is ECDsa)
                 certWithKey =  cert.CopyWithPrivateKey((ECDsa)key);
@@ -1276,12 +1323,15 @@ public class SubmitCertificateRequestCommand
         String attributes = null;
         if (parameters.ContainsKey("Template"))
         {
+            WriteVerboseEx("Adding template '{0}' to request", Template);
             attributes = String.Format(TEMPLATE_FORMAT, Template);
         }
 
         // Request was created through New-CertificateRequest, which means we have a key
         if (ParameterSetName == PSN_REQUESTANDKEY)
         {
+            WriteVerboseEx("Processing dynamic certificate request (no additional modifications will be made in the CA)");
+
             // Inform the user that the KeyUsage, SAN, OtherExtension and ExtendedKeyUsage parameters have no effect if the request was created by New-CertificateRequest
             var invalidParams = GetParameters();
             foreach (var parameter in invalidParams)
@@ -1294,15 +1344,19 @@ public class SubmitCertificateRequestCommand
             }
 
             // Submit request to CA
+            WriteVerboseEx("Submitting request to CA ({0})", ConfigString);
             var requestString = converter.StringToString(RequestAndKey.Request, CERTENROLLlib.EncodingType.XCN_CRYPT_STRING_BASE64, CERTENROLLlib.EncodingType.XCN_CRYPT_STRING_BASE64REQUESTHEADER); // Convert pure base64 to base64 with certificate request headers
             var disposition = (RequestDisposition)req.Submit(0x100, requestString, attributes, ConfigString); // The 0x100 is CR_IN_BASE64HEADER | CR_IN_PKCS10
             
+            WriteVerboseEx("Request disposition: {0}", disposition);
+
             string b64cert = null;
             int requestId = 0;
             // Account for having "PEND_ALL_REQUESTS" by checking if the request was set to Pending
             if (disposition == RequestDisposition.Pending || disposition == RequestDisposition.Issued)
             {
                 requestId = req.GetRequestId();
+                WriteVerboseEx("Request ID: {0}", requestId);
                 if (disposition == RequestDisposition.Pending)
                 {
                     // Automatically approve the request. No more attributes or extensions to add as they were all included in the initial request.
@@ -1330,8 +1384,16 @@ public class SubmitCertificateRequestCommand
         // In this case we will also add any provided extensions to the request, but only if the request was put in Pending state
         else
         {
+            WriteVerboseEx("Processing fixed certificate request (extensions may be added in the CA)");
             var requestString = converter.StringToString(CertificateSigningRequest, CERTENROLLlib.EncodingType.XCN_CRYPT_STRING_BASE64_ANY, CERTENROLLlib.EncodingType.XCN_CRYPT_STRING_BASE64REQUESTHEADER); // Convert any base64 format to base64 with certificate request headers
+
+            WriteVerboseEx("Submitting request to CA ({0})", ConfigString);
             var disposition = (RequestDisposition)req.Submit(0x100, requestString, attributes, ConfigString); // The 0x100 is CR_IN_BASE64HEADER | CR_IN_PKCS10
+
+            int requestId = req.GetRequestId();
+            WriteVerboseEx("Request ID: {0}", requestId);
+
+            WriteVerboseEx("Request disposition: {0}", disposition);
 
             // After submitting the request, we can add extensions to it, provided that the passed them in the function call.
             // To add extensions, the request must be in the Pending state, which means that we now need to check whether the certificate was immediately issued.
@@ -1355,10 +1417,9 @@ public class SubmitCertificateRequestCommand
             {
                 // If the request was put in the Pending state, we can continue with adding additional extensions to it
 
-                int requestId = req.GetRequestId();
-
                 if (parameters.ContainsKey("KeyUsage"))
                 {
+                    WriteVerboseEx("Adding KeyUsage extension with value {0} to request", KeyUsage);
                     var keyUsage = new X509KeyUsageExtension(KeyUsage, false);
                     CertAdminHelper.SetExtension(ConfigString, requestId, keyUsage);
                 }
@@ -1382,11 +1443,13 @@ public class SubmitCertificateRequestCommand
                 {
                     foreach (var extension in OtherExtension)
                     {
+                        WriteVerboseEx("Adding custom extension {0} ({1}) to request", extension.Oid.Value, String.IsNullOrEmpty(extension.Oid.FriendlyName) ? "<unknown>" : extension.Oid.FriendlyName);
                         CertAdminHelper.SetExtension(ConfigString, requestId, extension);
                     }
                 }
 
                 // Approve the request
+                WriteVerboseEx("Approving request {0}", requestId);
                 disposition = (RequestDisposition)certadmin.ResubmitRequest(ConfigString, requestId);
 
                 // If the resubmitted request fails, throw an exception
@@ -1424,6 +1487,7 @@ $Parameters.GenerateInMemory = $false
 $Provider = [System.CodeDom.Compiler.CodeDomProvider]::CreateProvider("CSharp")
 "Compiling {0}" -f $CertReqUtilDllName | Write-Verbose
 $Results = $Provider.CompileAssemblyFromSource($Parameters, $Code)
+$Results.Errors | Out-Host
 $FilesToProcess.Add($CertReqUtilDllPath)
 
 $ModuleName,$ManifestName | ForEach-Object -Process {
