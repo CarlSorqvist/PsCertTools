@@ -708,6 +708,119 @@ public static class Crypt
     }
 }
 
+public enum EnterpriseStoreName
+{
+    NTAuthCertificates,
+    TrustedRootCertificationAuthorities,
+    IntermediateCertificationAuthorities
+}
+public class EnterpriseStore
+{
+    public readonly String Name;
+
+    public EnterpriseStore(String name)
+    {
+        if (String.IsNullOrEmpty(name))
+            throw new ArgumentException("Store name must not be null or empty. Use 'certutil -enterprise -enumstore' to enumerate enterprise certificate stores.", "name");
+        Name = name;
+    }
+
+    public EnterpriseStore(EnterpriseStoreName name)
+    {
+        Name = GetStoreNameFromEnum(name);
+    }
+
+    private String GetStoreNameFromEnum(EnterpriseStoreName name)
+    {
+        switch (name)
+        {
+            case EnterpriseStoreName.NTAuthCertificates:
+                return "NTAuth";
+            case EnterpriseStoreName.TrustedRootCertificationAuthorities:
+                return "Root";
+            case EnterpriseStoreName.IntermediateCertificationAuthorities:
+            default:
+                return "CA";
+        }
+    }
+
+    public override String ToString()
+    {
+        return Name;
+    }
+
+    public static implicit operator EnterpriseStore(String name)
+    {
+        return new EnterpriseStore(name);
+    }
+}
+
+public static class X509StoreExtensions
+{
+    private const string Crypt32 = "Crypt32.dll";
+
+    private const int CERT_STORE_PROV_SYSTEM_A = 9;
+
+    private const int CERT_SYSTEM_STORE_LOCATION_SHIFT = 16;
+    private const int CERT_SYSTEM_STORE_LOCAL_MACHINE_ENTERPRISE_ID = 9;
+    private const int CERT_SYSTEM_STORE_LOCAL_MACHINE_ENTERPRISE = CERT_SYSTEM_STORE_LOCAL_MACHINE_ENTERPRISE_ID << CERT_SYSTEM_STORE_LOCATION_SHIFT;
+
+    private const int CERT_STORE_OPEN_EXISTING_FLAG = 0x00004000;
+    private const int CERT_STORE_MAXIMUM_ALLOWED_FLAG = 0x00001000;
+
+    [DllImport(Crypt32, CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CertOpenStore(
+        [In]
+        int lpszStoreProvider,
+
+        [MarshalAs(UnmanagedType.I4), In]
+        int dwEncodingType,
+
+        [In]
+        IntPtr hCryptProv,
+
+        [MarshalAs(UnmanagedType.I4), In]
+        int dwFlags,
+
+        [In]
+        IntPtr pvPara
+    );
+
+    [DllImport(Crypt32, CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool CertCloseStore(
+        [In]
+        IntPtr hCertStore,
+
+        [MarshalAs(UnmanagedType.I4), In]
+        int dwFlags
+    );
+
+    public static X509Store OpenEnterpriseStore(EnterpriseStore store)
+    {
+        if (store == null)
+            throw new ArgumentNullException("store");
+
+        IntPtr storeName = IntPtr.Zero;
+        IntPtr handle = IntPtr.Zero;
+        try
+        {
+            storeName = Marshal.StringToHGlobalAnsi(store.Name);
+            handle = CertOpenStore(CERT_STORE_PROV_SYSTEM_A, 0, IntPtr.Zero, CERT_SYSTEM_STORE_LOCAL_MACHINE_ENTERPRISE | CERT_STORE_OPEN_EXISTING_FLAG | CERT_STORE_MAXIMUM_ALLOWED_FLAG, storeName);
+            if (handle != IntPtr.Zero)
+                return new X509Store(handle);
+
+            throw new Win32Exception(Marshal.GetHRForLastWin32Error());
+        }
+        finally
+        {
+            if (storeName != IntPtr.Zero)
+                Marshal.FreeHGlobal(storeName);
+            if (handle != IntPtr.Zero)
+                CertCloseStore(handle, 0);
+        }
+    }
+}
+
 // Some helper methods that simplifies creating generic collection types using an existing array or IEnumerable as input, but as params.
 public static class CollectionUtil
 {

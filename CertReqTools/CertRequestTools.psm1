@@ -1075,6 +1075,10 @@ Function Install-Certificate
         , [Parameter(Mandatory = $false)]
         [System.Security.Cryptography.X509Certificates.StoreName]
         $Name = [System.Security.Cryptography.X509Certificates.StoreName]::My
+
+        , [Parameter(Mandatory = $false)]
+        [Switch]
+        $PassThru
     )
     Begin
     {
@@ -1119,6 +1123,10 @@ Function Install-Certificate
             Try
             {
                 $Store.Add($Certificate)
+                If ($PassThru)
+                {
+                    $PSCmdlet.WriteObject($Certificate)
+                }
             }
             Catch
             {
@@ -1133,6 +1141,32 @@ Function Install-Certificate
         $Store.Dispose()
     }
 }
+Function Get-EnterpriseCertificateStore
+{
+    [CmdletBinding(DefaultParameterSetName = "System")]
+    Param(
+        [Parameter(Mandatory = $true, ParameterSetName = "System")]
+        [EnterpriseStoreName]
+        $SystemStoreName
+
+        , [Parameter(Mandatory = $true, ParameterSetName = "Other")]
+        [EnterpriseStore]
+        $OtherStoreName
+    )
+    Process
+    {
+        If ($PSCmdlet.ParameterSetName -ieq "System")
+        {
+            $StoreName = [EnterpriseStore]::new($SystemStoreName)
+        }
+        Else
+        {
+            $StoreName = $OtherStoreName
+        }
+        $PSCmdlet.WriteObject([X509StoreExtensions]::OpenEnterpriseStore($StoreName))
+    }
+}
+
 New-Alias -Name Save-Certificate -Value Install-Certificate
 
 Export-ModuleMember -Function * -Cmdlet * -Alias *
