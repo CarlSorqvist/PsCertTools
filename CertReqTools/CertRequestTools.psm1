@@ -854,6 +854,11 @@ Function Export-PemCertificate
         , [Parameter(Mandatory = $false)]
         [Switch]
         $CopyToClipboard
+
+        , [Parameter(Mandatory = $false)]
+        [Alias("SkipExplorerView")]
+        [Switch]
+        $BatchMode
     )
     Process
     {
@@ -926,7 +931,10 @@ Function Export-PemCertificate
             "Exporting certificate to directory {0}" -f $OutputDirectory | Write-Verbose
             [System.IO.File]::WriteAllText($OutputFilename, $Pem)
             [System.IO.FileInfo]::new($OutputFilename)
-            explorer.exe /select,$OutputFilename
+            If (!$BatchMode)
+            {
+                explorer.exe /select,$OutputFilename
+            }
         }
         Catch
         {
