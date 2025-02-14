@@ -311,28 +311,91 @@ Function Get-X509Chain
 
 Function ConvertTo-Pem
 {
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = "Certificate")]
     [OutputType([String])]
     Param
     (
-        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ParameterSetName = "Certificate")]
         [System.Security.Cryptography.X509Certificates.X509Certificate2]
         $Certificate
+
+        , [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true, ParameterSetName = "AsymmetricAlgorithmPrivateKey")]
+        [Alias("Key")]
+        [System.Security.Cryptography.AsymmetricAlgorithm]
+        $PrivateKey
+
+        , [Parameter(Mandatory = $true, ValueFromPipeline = $true, ParameterSetName = "CngKeyPrivateKey")]
+        [System.Security.Cryptography.CngKey]
+        $CngKey
     )
     Begin
     {
-        $StringBuilder = [System.Text.StringBuilder]::new()
+        $PrivateKeyHeader = "-----BEGIN PRIVATE KEY-----"
+        $PrivateKeyFooter = "-----END PRIVATE KEY-----"
+
         $Converter = [CERTENROLLlib.CBinaryConverterClass]::new()
+        $ExportFlag = [System.Security.Cryptography.CngExportPolicies]::AllowPlaintextExport
     }
     Process
     {
-        $Base64Cert = [Convert]::ToBase64String($Certificate.RawData)
-        $Base64WithHeaders = $Converter.StringToString($Base64Cert, [CERTENClib.EncodingType]::XCN_CRYPT_STRING_BASE64, [CERTENClib.EncodingType]::XCN_CRYPT_STRING_BASE64HEADER)
-        [Void]$StringBuilder.Append($Base64WithHeaders)
-    }
-    End
-    {
-        $StringBuilder.ToString()
+        If ($PSCmdlet.ParameterSetName -ieq "Certificate")
+        {
+            $Base64Cert = [Convert]::ToBase64String($Certificate.RawData)
+            $Base64WithHeaders = $Converter.StringToString($Base64Cert, [CERTENClib.EncodingType]::XCN_CRYPT_STRING_BASE64, [CERTENClib.EncodingType]::XCN_CRYPT_STRING_BASE64HEADER)
+            $PSCmdlet.WriteObject($Base64WithHeaders, $true)
+        }
+        Else
+        {
+            $Key = $null
+            If ($PSCmdlet.ParameterSetName -ieq "AsymmetricAlgorithmPrivateKey")
+            {
+                If ($PrivateKey -is [System.Security.Cryptography.RSACng])
+                {
+                    $Key = ([System.Security.Cryptography.RSACng]$PrivateKey).Key
+                }
+                ElseIf ($PrivateKey -is [System.Security.Cryptography.ECDsaCng])
+                {
+                    $Key = ([System.Security.Cryptography.ECDsaCng]$PrivateKey).Key
+                }
+                Else
+                {
+                    $Message = "The input object is of type '{0}' - the only supported types are ECDsaCng and RSACng." -f $PrivateKey.Key.GetType().FullName
+                    $Ex = [System.NotSupportedException]::new($Message)
+                    Write-Error -Exception $Ex
+                    return
+                }
+            }
+            Else
+            {
+                $Key = $CngKey
+            }
+            
+            If (!$Key.ExportPolicy.HasFlag($ExportFlag))
+            {
+                $Message = "The provided private key does not allow plaintext key export. ExportPolicy: {0}" -f $Key.ExportPolicy
+                $Ex = [System.InvalidOperationException]::new($Message)
+                Write-Error -Exception $Ex
+                return
+            }
+
+            Try
+            {
+                $ExportedKey = $Key.Export([System.Security.Cryptography.CngKeyBlobFormat]::Pkcs8PrivateBlob)
+            }
+            Catch
+            {
+                Write-Error -ErrorRecord $_
+                return
+            }
+
+            $Result = [System.Text.StringBuilder]::new().
+                AppendLine($PrivateKeyHeader).
+                Append([Convert]::ToBase64String($ExportedKey, [System.Base64FormattingOptions]::InsertLineBreaks)).
+                AppendLine().
+                AppendLine($PrivateKeyFooter).ToString()
+            
+            $PSCmdlet.WriteObject($Result, $true)
+        }
     }
 }
 Function Export-PrivateKey
