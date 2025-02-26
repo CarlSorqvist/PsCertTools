@@ -1212,6 +1212,92 @@ Function Install-Certificate
         $Store.Dispose()
     }
 }
+Function Show-CertificateRequest
+{
+    [CmdletBinding()]
+    Param
+    (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
+        [Alias("Request")]
+        [String]
+        $CertificateRequest
+
+        , [Parameter(Mandatory = $false)]
+        [Switch]
+        $PassThru
+    )
+    Process
+    {
+        Try
+        {
+            # Convert the CSR to plain Base64 without headers
+            $PlainRequest = Convert-X509Data -InputObject $CertificateRequest -FromType XCN_CRYPT_STRING_BASE64_ANY -ToType XCN_CRYPT_STRING_BASE64 -ErrorAction Stop
+            
+            # Deserialize the request
+            $Request = [CERTENROLLlib.CX509CertificateRequestPkcs10Class]::new()
+            $Request.InitializeDecode($PlainRequest, [CERTENClib.EncodingType]::XCN_CRYPT_STRING_BASE64)
+
+            # Create header with subject and key algorithm/size
+
+            $Msg = [System.Text.StringBuilder]::new("X.509 PKCS10 Certificate Request").AppendLine().
+                AppendLine("--------------------------------").
+                AppendLine().
+                AppendLine("Subject:").
+                Append("`t").AppendLine($Request.Subject.Name).
+                AppendLine().
+                AppendLine("Public Key:").
+                AppendFormat("`t{0}, {1} bits", $Request.PublicKey.Algorithm.FriendlyName, $Request.PublicKey.Length).
+                AppendLine().
+                AppendLine().
+                AppendLine("X.509 Certificate Extensions:").
+                AppendLine()
+
+            # Iterate and report on extensions
+
+            Foreach ($RequestExtension in $Request.X509Extensions)
+            {
+                $Oid = $RequestExtension.ObjectID.Value
+
+                $X509Extension = [System.Security.Cryptography.X509Certificates.X509Extension]::new($Oid, [Convert]::FromBase64String($RequestExtension.RawData([CERTENClib.EncodingType]::XCN_CRYPT_STRING_BASE64)), $RequestExtension.Critical)
+
+                $FriendlyName = "Unknown extension"
+                If (![String]::IsNullOrWhiteSpace($X509Extension.Oid.FriendlyName))
+                {
+                    $FriendlyName = $X509Extension.Oid.FriendlyName
+                }
+                $Critical = ""
+                If ($X509Extension.Critical)
+                {
+                    $Critical = " [CRITICAL]"
+                }
+
+                [Void]$Msg.AppendFormat("`t{0} ({1}){2}:", $FriendlyName, $X509Extension.Oid.Value, $Critical).
+                    AppendLine()
+
+                $FormattedValue = $X509Extension.Format($true) -split "`r?`n"
+                Foreach ($Line in $FormattedValue)
+                {
+                    [Void]$Msg.Append("`t`t").AppendLine($Line)
+                }
+            }
+
+            # Output the report
+            $Msg.ToString() | Write-Host -ForegroundColor Yellow
+
+            If ($PassThru)
+            {
+                # Output the request
+
+                $PSCmdlet.WriteObject($CertificateRequest)
+            }
+
+        }
+        Catch
+        {
+            $_ | Write-Error
+        }
+    }
+}
 Function Get-EnterpriseCertificateStore
 {
     [CmdletBinding(DefaultParameterSetName = "System")]
