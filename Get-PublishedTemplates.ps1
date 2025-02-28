@@ -1,4 +1,7 @@
-﻿using namespace System.Collections.Generic
+﻿#Requires -version 5
+
+using namespace System.Collections.Generic
+using module ActiveDirectory
 
 $RootDSE = Get-ADRootDSE
 $Configuration = $RootDSE.configurationNamingContext
