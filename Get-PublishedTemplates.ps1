@@ -16,15 +16,19 @@ Foreach ($ADTemplate in Get-ADObject -SearchBase $TemplatesContainer -Filter { o
     $TemplateLookup.Add($ADTemplate.Name, $ADTemplate)
 }
 
+# Get Enrollment CAs
 $CAs = Get-ADObject -SearchBase $EnrollmentServicesContainer -Filter { objectClass -eq "pKIEnrollmentService" } -Properties certificateTemplates
 
+# Iterate CAs
 Foreach ($CA in $CAs)
 {
+    # Iterate published templates
     Foreach ($CATemplate in $CA.certificateTemplates)
     {
         $Template = $null
         If ($TemplateLookup.TryGetValue($CATemplate, [ref] $Template))
         {
+            # Get and translate EKUs
             $EKUs = [List[System.Security.Cryptography.Oid]]::new()
             Foreach ($EKU in $Template.pKIExtendedKeyUsage)
             {
@@ -32,6 +36,7 @@ Foreach ($CA in $CAs)
                 $EKUs.Add($Oid)
             }
             
+            # Output object
             [pscustomobject][ordered]@{
                 CA = $CA.Name
                 Template = $Template.Name
