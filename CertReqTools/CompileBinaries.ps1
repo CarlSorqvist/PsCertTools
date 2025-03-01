@@ -864,6 +864,214 @@ public static class DebugHelper
     }
 }
 
+public static class EnrollmentHelper
+{
+    private static readonly Dictionary<String, AdcsEnrollmentService> templateCache = new Dictionary<String, AdcsEnrollmentService>(StringComparer.CurrentCultureIgnoreCase);
+    public const String DefaultLdapPolicyServerUrl = "LDAP:";
+    public const String DefaultLdapPolicyServerId = "";
+
+    private static void ThrowIfNull(object obj, string paramName)
+    {
+        if (obj == null)
+            throw new ArgumentNullException(paramName);
+    }
+
+    public static void ClearTemplateCache()
+    {
+        templateCache.Clear();
+    }
+
+    public static IX509EnrollmentPolicyServer GetEnrollmentPolicy(
+        String policyServerUrl,
+        String policyServerId,
+        CERTENROLLlib.X509EnrollmentAuthFlags authFlags,
+        bool isUntrusted,
+        X509CertificateEnrollmentContext context,
+        X509EnrollmentPolicyLoadOption loadOption
+    )
+    {
+        var enrollmentPolicy = new CX509EnrollmentPolicyActiveDirectoryClass();
+        enrollmentPolicy.Initialize(policyServerUrl, policyServerId, authFlags, isUntrusted, context);
+        enrollmentPolicy.LoadPolicy(loadOption);
+        return enrollmentPolicy;
+    }
+
+    public static IX509EnrollmentPolicyServer GetEnrollmentPolicy()
+    {
+        return GetEnrollmentPolicy(
+            DefaultLdapPolicyServerUrl,                         // Default LDAP provider
+            DefaultLdapPolicyServerId,
+            CERTENROLLlib.X509EnrollmentAuthFlags.X509AuthNone, // Kerberos pass-through
+            false,                                              // Trusted CAs only
+            X509CertificateEnrollmentContext.ContextUser,       // Current user context
+            X509EnrollmentPolicyLoadOption.LoadOptionReload     // Always reload
+        );
+    }
+
+    internal static IX509CertificateTemplates GetTemplatesInternal(IX509EnrollmentPolicyServer enrollmentPolicy)
+    {
+        return (IX509CertificateTemplates)enrollmentPolicy.GetTemplates();
+    }
+
+    public static List<AdcsCertificateTemplate> GetTemplates(IX509EnrollmentPolicyServer enrollmentPolicy)
+    {
+        ThrowIfNull(enrollmentPolicy, "enrollmentPolicy");
+        return enrollmentPolicy.GetTemplates().Cast<IX509CertificateTemplate>().Select(t => new AdcsCertificateTemplate(t)).ToList();
+    }
+    public static List<AdcsCertificateTemplate> GetTemplates()
+    {
+        return GetTemplates(GetEnrollmentPolicy());
+    }
+
+    public static AdcsCertificateTemplate GetTemplateByName(String name)
+    {
+        return GetTemplateByName(GetEnrollmentPolicy(), name);
+    }
+    public static AdcsCertificateTemplate GetTemplateByName(IX509EnrollmentPolicyServer enrollmentPolicy, String name)
+    {
+        return new AdcsCertificateTemplate(GetTemplatesInternal(enrollmentPolicy).ItemByName[name]);
+    }
+
+    public static List<AdcsEnrollmentService> GetCAs(IX509EnrollmentPolicyServer enrollmentPolicy)
+    {
+        ThrowIfNull(enrollmentPolicy, "enrollmentPolicy");
+        return enrollmentPolicy.GetCAs().Cast<ICertificationAuthority>().Select(ca => new AdcsEnrollmentService(ca)).ToList();
+    }
+    public static List<AdcsEnrollmentService> GetCAs()
+    {
+        return GetCAs(GetEnrollmentPolicy());
+    }
+
+    public static IEnumerable<AdcsCertificateTemplate> GetPublishedTemplates(IX509EnrollmentPolicyServer enrollmentPolicy, AdcsEnrollmentService ca)
+    {
+        ThrowIfNull(enrollmentPolicy, "enrollmentPolicy");
+        ThrowIfNull(ca, "ca");
+
+        var templates = GetTemplates(enrollmentPolicy).ToDictionary(t => t.Name, StringComparer.CurrentCultureIgnoreCase);
+
+        foreach (var templateName in ca.GetTemplates())
+        {
+            AdcsCertificateTemplate template;
+            if (templates.TryGetValue(templateName, out template))
+            {
+                yield return template;
+            }
+        }
+    }
+    public static IEnumerable<AdcsCertificateTemplate> GetPublishedTemplates(AdcsEnrollmentService ca)
+    {
+        return GetPublishedTemplates(GetEnrollmentPolicy(), ca);
+    }
+
+    public static AdcsEnrollmentService FindCAForTemplate(String templateName)
+    {
+        AdcsEnrollmentService ca;
+        if (!templateCache.TryGetValue(templateName, out ca))
+        {
+            var policy = GetEnrollmentPolicy();
+            var template = GetTemplateByName(policy, templateName);
+            ca = template.GetCAsForTemplate(policy).FirstOrDefault();
+            templateCache.Add(templateName, ca);
+        }
+        return ca;
+    }
+}
+public class AdcsEnrollmentService
+{
+    public String Name { get; private set; }
+    public String Server { get; private set; }
+
+    private readonly ICertificationAuthority certAuthority;
+    private String configString;
+    private X509Certificate2 cACertificate;
+    private List<String> templates;
+
+    public AdcsEnrollmentService(ICertificationAuthority ca)
+    {
+        if (ca == null)
+            throw new ArgumentNullException("ca");
+
+        certAuthority = ca;
+        Initialize();
+    }
+    private void Initialize()
+    {
+        Name = (string)certAuthority.Property[EnrollmentCAProperty.CAPropCommonName];
+        Server = (string)certAuthority.Property[EnrollmentCAProperty.CAPropDNSName];
+    }
+    public X509Certificate2 GetCACertificate()
+    {
+        if (cACertificate == null)
+            cACertificate = new X509Certificate2((byte[])certAuthority.Property[EnrollmentCAProperty.CAPropCertificate]);
+         return cACertificate;
+    }
+    public String GetConfigString()
+    {
+        if (String.IsNullOrEmpty(configString))
+            configString = String.Format("{0}\\{1}", Server, Name);
+        return configString;
+    }
+    public ISet<String> GetTemplates()
+    {
+        if (templates == null)
+        {
+            templates = ((string[])certAuthority.Property[EnrollmentCAProperty.CAPropCertificateTypes]).ToList();
+        }
+        return new HashSet<String>(templates, StringComparer.CurrentCultureIgnoreCase);
+    }
+    public object GetProperty(EnrollmentCAProperty property)
+    {
+        return certAuthority.Property[property];
+    }
+    public override String ToString()
+    {
+        return GetConfigString();
+    }
+}
+
+public class AdcsCertificateTemplate
+{
+    public String Name { get; private set; }
+    public String DisplayName { get; private set; }
+    public String Oid { get; private set; }
+
+    private IX509CertificateTemplate certTemplate;
+
+    public AdcsCertificateTemplate(IX509CertificateTemplate template)
+    {
+        if (template == null)
+            throw new ArgumentNullException("template");
+
+        certTemplate = template;
+        Initialize();
+    }
+    private void Initialize()
+    {
+        Name = (string)certTemplate.Property[EnrollmentTemplateProperty.TemplatePropCommonName];
+        DisplayName = (string)certTemplate.Property[EnrollmentTemplateProperty.TemplatePropFriendlyName];
+        Oid = ((IObjectId)certTemplate.Property[EnrollmentTemplateProperty.TemplatePropOID]).Value;
+    }
+    public object GetProperty(EnrollmentTemplateProperty property)
+    {
+        return certTemplate.Property[property];
+    }
+    public IEnumerable<AdcsEnrollmentService> GetCAsForTemplate(IX509EnrollmentPolicyServer enrollmentPolicy)
+    {
+        if (enrollmentPolicy == null)
+            throw new ArgumentNullException("enrollmentPolicy");
+
+        return enrollmentPolicy.GetCAsForTemplate(certTemplate).Cast<ICertificationAuthority>().Select(ca => new AdcsEnrollmentService(ca));
+    }
+    public IEnumerable<AdcsEnrollmentService> GetCAsForTemplate()
+    {
+        return GetCAsForTemplate(EnrollmentHelper.GetEnrollmentPolicy());
+    }
+    public override String ToString()
+    {
+        return Name;
+    }
+}
+
 public static class CertAdminHelper
 {
     [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
@@ -1375,7 +1583,8 @@ public class SubmitCertificateRequestCommand
     [Alias("Csr", "Request")]
     public String CertificateSigningRequest;
     
-    [Parameter(Mandatory = true)]
+    [Parameter(Mandatory = false)]
+    [ValidateNotNullOrEmpty()]
     [Alias("CA")]
     public String ConfigString;
 
@@ -1426,6 +1635,24 @@ public class SubmitCertificateRequestCommand
         throw new Exception(message, caException);
     }
 
+    protected bool GetCAForTemplate(out String configString)
+    {
+        if (String.IsNullOrWhiteSpace(Template))
+        {
+            throw new ArgumentException("The -ConfigString parameter must be specified if not using the -Template parameter.");
+        }
+        var ca = EnrollmentHelper.FindCAForTemplate(Template);
+
+        if (ca != null)
+        {
+            WriteVerboseEx("Using CA '{0}'", ca);
+            configString = ca.ToString();
+            return true;
+        }
+        configString = "";
+        return false;
+    }
+
     protected override void ProcessRecord()
     {
         var parameters = MyInvocation.BoundParameters;
@@ -1438,6 +1665,19 @@ public class SubmitCertificateRequestCommand
         {
             WriteVerboseEx("Adding template '{0}' to request", Template);
             attributes = String.Format(TEMPLATE_FORMAT, Template);
+        }
+
+        string configString;
+        if (String.IsNullOrWhiteSpace(ConfigString))
+        {
+            if (!GetCAForTemplate(out configString))
+            {
+                throw new ArgumentException("Could not find a CA that publishes the specified template. Use the -ConfigString parameter to override.");
+            }
+        }
+        else
+        {
+            configString = ConfigString;
         }
 
         // Request was created through New-CertificateRequest, which means we have a key
@@ -1457,9 +1697,9 @@ public class SubmitCertificateRequestCommand
             }
 
             // Submit request to CA
-            WriteVerboseEx("Submitting request to CA ({0})", ConfigString);
+            WriteVerboseEx("Submitting request to CA ({0})", configString);
             var requestString = converter.StringToString(RequestAndKey.Request, CERTENROLLlib.EncodingType.XCN_CRYPT_STRING_BASE64, CERTENROLLlib.EncodingType.XCN_CRYPT_STRING_BASE64REQUESTHEADER); // Convert pure base64 to base64 with certificate request headers
-            var disposition = (RequestDisposition)req.Submit(0x100, requestString, attributes, ConfigString); // The 0x100 is CR_IN_BASE64HEADER | CR_IN_PKCS10
+            var disposition = (RequestDisposition)req.Submit(0x100, requestString, attributes, configString); // The 0x100 is CR_IN_BASE64HEADER | CR_IN_PKCS10
             
             WriteVerboseEx("Request disposition: {0}", disposition);
 
@@ -1473,7 +1713,7 @@ public class SubmitCertificateRequestCommand
                 if (disposition == RequestDisposition.Pending)
                 {
                     // Automatically approve the request. No more attributes or extensions to add as they were all included in the initial request.
-                    disposition = (RequestDisposition)certadmin.ResubmitRequest(ConfigString, requestId);
+                    disposition = (RequestDisposition)certadmin.ResubmitRequest(configString, requestId);
 
                     // If the resubmitted request fails, throw an exception
                     if (disposition != RequestDisposition.Issued)
@@ -1482,7 +1722,7 @@ public class SubmitCertificateRequestCommand
                     }
                     
                     // Fetch the issued certificate
-                    req.GetIssuedCertificate(ConfigString, requestId, null);
+                    req.GetIssuedCertificate(configString, requestId, null);
                 }
 
                 WriteObject(GetCertificate(req, RequestAndKey.Key));
@@ -1500,8 +1740,8 @@ public class SubmitCertificateRequestCommand
             WriteVerboseEx("Processing fixed certificate request (extensions may be added in the CA)");
             var requestString = converter.StringToString(CertificateSigningRequest, CERTENROLLlib.EncodingType.XCN_CRYPT_STRING_BASE64_ANY, CERTENROLLlib.EncodingType.XCN_CRYPT_STRING_BASE64REQUESTHEADER); // Convert any base64 format to base64 with certificate request headers
 
-            WriteVerboseEx("Submitting request to CA ({0})", ConfigString);
-            var disposition = (RequestDisposition)req.Submit(0x100, requestString, attributes, ConfigString); // The 0x100 is CR_IN_BASE64HEADER | CR_IN_PKCS10
+            WriteVerboseEx("Submitting request to CA ({0})", configString);
+            var disposition = (RequestDisposition)req.Submit(0x100, requestString, attributes, configString); // The 0x100 is CR_IN_BASE64HEADER | CR_IN_PKCS10
 
             int requestId = req.GetRequestId();
             WriteVerboseEx("Request ID: {0}", requestId);
@@ -1534,21 +1774,21 @@ public class SubmitCertificateRequestCommand
                 {
                     WriteVerboseEx("Adding KeyUsage extension with value {0} to request", KeyUsage);
                     var keyUsage = new X509KeyUsageExtension(KeyUsage, false);
-                    CertAdminHelper.SetExtension(ConfigString, requestId, keyUsage);
+                    CertAdminHelper.SetExtension(configString, requestId, keyUsage);
                 }
 
                 // Add EKUs
                 X509EnhancedKeyUsageExtension eku;
                 if (BuildEku(out eku))
                 {
-                    CertAdminHelper.SetExtension(ConfigString, requestId, eku);
+                    CertAdminHelper.SetExtension(configString, requestId, eku);
                 }
 
                 // Add Subject Alternative Name extension if provided
                 X509Extension san;
                 if (BuildSan(out san))
                 {
-                    CertAdminHelper.SetExtension(ConfigString, requestId, san);
+                    CertAdminHelper.SetExtension(configString, requestId, san);
                 }
         
                 // Add additional extensions
@@ -1557,13 +1797,13 @@ public class SubmitCertificateRequestCommand
                     foreach (var extension in OtherExtension)
                     {
                         WriteVerboseEx("Adding custom extension {0} ({1}) to request", extension.Oid.Value, String.IsNullOrEmpty(extension.Oid.FriendlyName) ? "<unknown>" : extension.Oid.FriendlyName);
-                        CertAdminHelper.SetExtension(ConfigString, requestId, extension);
+                        CertAdminHelper.SetExtension(configString, requestId, extension);
                     }
                 }
 
                 // Approve the request
                 WriteVerboseEx("Approving request {0}", requestId);
-                disposition = (RequestDisposition)certadmin.ResubmitRequest(ConfigString, requestId);
+                disposition = (RequestDisposition)certadmin.ResubmitRequest(configString, requestId);
 
                 // If the resubmitted request fails, throw an exception
                 if (disposition != RequestDisposition.Issued)
@@ -1572,7 +1812,7 @@ public class SubmitCertificateRequestCommand
                 }
 
                 // Fetch the issued certificate
-                req.GetIssuedCertificate(ConfigString, requestId, null);
+                req.GetIssuedCertificate(configString, requestId, null);
 
                 // If the request was successful, get the issued certificate and return it
                 WriteObject(GetCertificate(req));

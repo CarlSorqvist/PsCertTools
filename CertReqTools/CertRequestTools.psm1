@@ -1323,6 +1323,147 @@ Function Get-EnterpriseCertificateStore
         $PSCmdlet.WriteObject([X509StoreExtensions]::OpenEnterpriseStore($StoreName))
     }
 }
+Function Get-EnrollmentPolicy
+{
+    [CmdletBinding()]
+    [OutputType([CERTENROLLlib.CX509EnrollmentPolicyActiveDirectoryClass])]
+    Param(
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()]
+        [String]
+        $PolicyServerUrl = [EnrollmentHelper]::DefaultLdapPolicyServerUrl
+
+        , [Parameter(Mandatory = $false)]
+        [String]
+        $PolicyServerId = [EnrollmentHelper]::DefaultLdapPolicyServerId
+
+        , [Parameter(Mandatory = $false)]
+        [CERTENROLLlib.X509EnrollmentAuthFlags]
+        $AuthFlags = [CERTENROLLlib.X509EnrollmentAuthFlags]::X509AuthNone
+
+        , [Parameter(Mandatory = $false)]
+        [bool]
+        $AllowUntrustedCAs = $false
+
+        , [Parameter(Mandatory = $false)]
+        [CERTENROLLlib.X509CertificateEnrollmentContext]
+        $Context = [CERTENROLLlib.X509CertificateEnrollmentContext]::ContextUser
+
+        , [Parameter(Mandatory = $false)]
+        [CERTENROLLlib.X509EnrollmentPolicyLoadOption]
+        $LoadOption = [CERTENROLLlib.X509EnrollmentPolicyLoadOption]::LoadOptionReload
+
+    )
+    Process
+    {
+        $PSCmdlet.WriteObject([EnrollmentHelper]::GetEnrollmentPolicy($PolicyServerUrl, $PolicyServerId, $AuthFlags, $AllowUntrustedCAs, $Context, $LoadOption))
+    }
+}
+
+Function Get-AdcsEnrollmentServices
+{
+    [CmdletBinding(DefaultParameterSetName = "All")]
+    [OutputType([CERTENROLLlib.CX509EnrollmentPolicyActiveDirectoryClass])]
+    Param(
+        [Parameter(Mandatory = $false, ValueFromPipeline = $true)]
+        [ValidateNotNull()]
+        [CERTENROLLlib.CX509EnrollmentPolicyActiveDirectoryClass]
+        $EnrollmentPolicy = [EnrollmentHelper]::GetEnrollmentPolicy()
+
+        , [Parameter(Mandatory = $true, ParameterSetName = "FilterName")]
+        [String]
+        $Name
+    )
+    Begin
+    {
+        If ($PSCmdlet.ParameterSetName -ieq "FilterName")
+        {
+            $WildcardPattern = [X509Extensions.ExtendedKeyUsage]::ToWildcardPattern($Name)
+            $Options = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::Compiled
+            $NameRegex = [System.Text.RegularExpressions.Regex]::new($WildcardPattern, $Options)
+        }
+    }
+    Process
+    {
+        $CAs = [EnrollmentHelper]::GetCAs($EnrollmentPolicy)
+        If ($PSCmdlet.ParameterSetName -ieq "FilterName")
+        {
+            Foreach ($CA in $CAs)
+            {
+                If ($NameRegex.IsMatch($CA.Name))
+                {
+                    $PSCmdlet.WriteObject($CA)
+                }
+            }
+        }
+        Else
+        {
+            $PSCmdlet.WriteObject($CAs, $true)
+        }
+        
+    }
+}
+Function Get-CertificateTemplate
+{
+    [CmdletBinding(DefaultParameterSetName = "All")]
+    [OutputType([AdcsCertificateTemplate])]
+    Param(
+        [Parameter(Mandatory = $false, ValueFromPipeline = $true, ParameterSetName = "All")]
+        [Parameter(Mandatory = $false, ValueFromPipeline = $true, ParameterSetName = "ByName")]
+        [Parameter(Mandatory = $false, ParameterSetName = "ByCA")]
+        [ValidateNotNull()]
+        [CERTENROLLlib.CX509EnrollmentPolicyActiveDirectoryClass]
+        $EnrollmentPolicy = [EnrollmentHelper]::GetEnrollmentPolicy()
+
+        , [Parameter(Mandatory = $true, ParameterSetName = "ByName")]
+        [String]
+        $TemplateName
+
+        , [Parameter(Mandatory = $true, ValueFromPipeline = $true, ParameterSetName = "ByCA")]
+        [AdcsEnrollmentService]
+        $PublishedOnCA
+    )
+    Begin
+    {
+        If ($PSCmdlet.ParameterSetName -ieq "ByName")
+        {
+            $WildcardPattern = [X509Extensions.ExtendedKeyUsage]::ToWildcardPattern($TemplateName)
+            $Options = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::Compiled
+            $NameRegex = [System.Text.RegularExpressions.Regex]::new($WildcardPattern, $Options)
+        }
+    }
+    Process
+    {
+        If ($PSCmdlet.ParameterSetName -ieq "All")
+        {
+            $PSCmdlet.WriteObject([EnrollmentHelper]::GetTemplates($EnrollmentPolicy), $true)
+        }
+        ElseIf ($PSCmdlet.ParameterSetName -ieq "ByName")
+        {
+            Foreach ($Template in [EnrollmentHelper]::GetTemplates($EnrollmentPolicy))
+            {
+                If ($NameRegex.IsMatch($Template.Name))
+                {
+                    $PSCmdlet.WriteObject($Template)
+                }
+            }
+        }
+        Else
+        {
+            $PSCmdlet.WriteObject([EnrollmentHelper]::GetPublishedTemplates($EnrollmentPolicy, $PublishedOnCA), $true)
+        }
+        
+    }
+}
+Function Clear-TemplateCache
+{
+    [CmdletBinding()]
+    Param()
+    Process
+    {
+        [EnrollmentHelper]::ClearTemplateCache()
+    }
+}
 
 New-Alias -Name Save-Certificate -Value Install-Certificate
 
