@@ -1360,7 +1360,7 @@ Function Get-EnrollmentPolicy
     }
 }
 
-Function Get-AdcsEnrollmentServices
+Function Get-AdcsEnrollmentService
 {
     [CmdletBinding(DefaultParameterSetName = "All")]
     [OutputType([CERTENROLLlib.CX509EnrollmentPolicyActiveDirectoryClass])]
