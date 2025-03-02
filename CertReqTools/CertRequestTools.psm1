@@ -1363,7 +1363,7 @@ Function Get-EnrollmentPolicy
 Function Get-AdcsEnrollmentService
 {
     [CmdletBinding(DefaultParameterSetName = "All")]
-    [OutputType([CERTENROLLlib.CX509EnrollmentPolicyActiveDirectoryClass])]
+    [OutputType([AdcsEnrollmentService])]
     Param(
         [Parameter(Mandatory = $false, ValueFromPipeline = $true)]
         [ValidateNotNull()]
@@ -1453,6 +1453,38 @@ Function Get-CertificateTemplate
             $PSCmdlet.WriteObject([EnrollmentHelper]::GetPublishedTemplates($EnrollmentPolicy, $PublishedOnCA), $true)
         }
         
+    }
+}
+Function Get-PkiObjectProperty
+{
+    [CmdletBinding(DefaultParameterSetName = "AdcsEnrollmentService")]
+    Param(
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ParameterSetName = "AdcsEnrollmentService")]
+        [AdcsEnrollmentService]
+        $EnrollmentService
+
+        , [Parameter(Mandatory = $true, ParameterSetName = "AdcsEnrollmentService")]
+        [CERTENROLLlib.EnrollmentCAProperty]
+        $EnrollmentServiceProperty
+
+        , [Parameter(Mandatory = $true, ValueFromPipeline = $true, ParameterSetName = "AdcsCertificateTemplate")]
+        [AdcsCertificateTemplate]
+        $Template
+
+        , [Parameter(Mandatory = $true, ParameterSetName = "AdcsCertificateTemplate")]
+        [CERTENROLLlib.EnrollmentTemplateProperty]
+        $EnrollmentTemplateProperty
+    )
+    Process
+    {
+        If ($PSCmdlet.ParameterSetName -ieq "AdcsEnrollmentService")
+        {
+            $PSCmdlet.WriteObject($EnrollmentService.GetProperty($EnrollmentServiceProperty))
+        }
+        Else
+        {
+            $PSCmdlet.WriteObject($Template.GetProperty($EnrollmentTemplateProperty))
+        }
     }
 }
 Function Clear-TemplateCache
