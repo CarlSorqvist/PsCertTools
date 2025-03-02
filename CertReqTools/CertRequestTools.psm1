@@ -1365,7 +1365,9 @@ Function Get-AdcsEnrollmentService
     [CmdletBinding(DefaultParameterSetName = "All")]
     [OutputType([AdcsEnrollmentService])]
     Param(
-        [Parameter(Mandatory = $false, ValueFromPipeline = $true)]
+        [Parameter(Mandatory = $false, ValueFromPipeline = $true, ParameterSetName = "All")]
+        [Parameter(Mandatory = $false, ValueFromPipeline = $true, ParameterSetName = "FilterName")]
+        [Parameter(Mandatory = $false, ParameterSetName = "FindCAsForTemplate")]
         [ValidateNotNull()]
         [CERTENROLLlib.CX509EnrollmentPolicyActiveDirectoryClass]
         $EnrollmentPolicy = [EnrollmentHelper]::GetEnrollmentPolicy()
@@ -1373,6 +1375,10 @@ Function Get-AdcsEnrollmentService
         , [Parameter(Mandatory = $true, ParameterSetName = "FilterName")]
         [String]
         $Name
+
+        , [Parameter(Mandatory = $true, ValueFromPipeline = $true, ParameterSetName = "FindCAsForTemplate")]
+        [AdcsCertificateTemplate]
+        $Template
     )
     Begin
     {
@@ -1385,22 +1391,28 @@ Function Get-AdcsEnrollmentService
     }
     Process
     {
-        $CAs = [EnrollmentHelper]::GetCAs($EnrollmentPolicy)
-        If ($PSCmdlet.ParameterSetName -ieq "FilterName")
+        If ($PSCmdlet.ParameterSetName -ieq "FindCAsForTemplate")
         {
-            Foreach ($CA in $CAs)
-            {
-                If ($NameRegex.IsMatch($CA.Name))
-                {
-                    $PSCmdlet.WriteObject($CA)
-                }
-            }
+            $PSCmdlet.WriteObject($Template.GetCAsForTemplate($EnrollmentPolicy), $true)
         }
         Else
         {
-            $PSCmdlet.WriteObject($CAs, $true)
+            $CAs = [EnrollmentHelper]::GetCAs($EnrollmentPolicy)
+            If ($PSCmdlet.ParameterSetName -ieq "FilterName")
+            {
+                Foreach ($CA in $CAs)
+                {
+                    If ($NameRegex.IsMatch($CA.Name))
+                    {
+                        $PSCmdlet.WriteObject($CA)
+                    }
+                }
+            }
+            Else
+            {
+                $PSCmdlet.WriteObject($CAs, $true)
+            }
         }
-        
     }
 }
 Function Get-CertificateTemplate
@@ -1416,6 +1428,7 @@ Function Get-CertificateTemplate
         $EnrollmentPolicy = [EnrollmentHelper]::GetEnrollmentPolicy()
 
         , [Parameter(Mandatory = $true, ParameterSetName = "ByName")]
+        [Alias("Name")]
         [String]
         $TemplateName
 
