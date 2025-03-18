@@ -20,8 +20,13 @@ Function New-PrivateKey
         $EccAlgorithm = [System.Security.Cryptography.CngAlgorithm]::ECDiffieHellmanP256
 
         , [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()]
         [String]
         $KeyName
+
+        , [Parameter(Mandatory = $false)]
+        [Switch]
+        $GenerateKeyName
 
         , [Parameter(Mandatory = $false)]
         [ValidateNotNull()]
@@ -80,7 +85,7 @@ Function New-PrivateKey
         {
             $KeyParams.KeyCreationOptions = $KeyParams.KeyCreationOptions -bor [System.Security.Cryptography.CngKeyCreationOptions]::OverwriteExistingKey
         }
-        If ([String]::IsNullOrEmpty($KeyName))
+        If ([String]::IsNullOrEmpty($KeyName) -and !$GenerateKeyName)
         {
             # Ephemeral key (in-memory only, no key name)
             $Key = [System.Security.Cryptography.CngKey]::Create($Algorithm, [NullString]::Value, $KeyParams)
@@ -88,9 +93,14 @@ Function New-PrivateKey
         Else
         {
             # Persistent key, stored in the selected provider
+            $KeyNameFinal = $KeyName
+            If ($GenerateKeyName)
+            {
+                $KeyNameFinal = [Guid]::NewGuid().ToString()
+            }
             Try
             {
-                $Key = [System.Security.Cryptography.CngKey]::Create($Algorithm, $KeyName, $KeyParams)
+                $Key = [System.Security.Cryptography.CngKey]::Create($Algorithm, $KeyNameFinal, $KeyParams)
             }
             Catch
             {
