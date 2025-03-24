@@ -1142,20 +1142,25 @@ Function New-CertificatePolicy
 
 Function Install-Certificate
 {
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = "CommonStore")]
     Param(
         [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
         [Alias("Cert")]
         [System.Security.Cryptography.X509Certificates.X509Certificate2]
         $Certificate
 
-        , [Parameter(Mandatory = $false)]
+        , [Parameter(Mandatory = $false, ParameterSetName = "CommonStore")]
         [System.Security.Cryptography.X509Certificates.StoreLocation]
         $Location = [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
 
-        , [Parameter(Mandatory = $false)]
+        , [Parameter(Mandatory = $false, ParameterSetName = "CommonStore")]
         [System.Security.Cryptography.X509Certificates.StoreName]
         $Name = [System.Security.Cryptography.X509Certificates.StoreName]::My
+
+        , [Parameter(Mandatory = $true, ParameterSetName = "CustomStore")]
+        [Alias("Store")]
+        [System.Security.Cryptography.X509Certificates.X509Store]
+        $CertStore
 
         , [Parameter(Mandatory = $false)]
         [Switch]
@@ -1167,8 +1172,15 @@ Function Install-Certificate
         {
             "Administrative privileges may be required to add certificates to the local machine store." | Write-Warning
         }
-        $Store = [System.Security.Cryptography.X509Certificates.X509Store]::new($Name, $Location)
-        $Store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::OpenExistingOnly -bor [System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+        If ($PSCmdlet.ParameterSetName -ieq "CommonStore")
+        {
+            $Store = [System.Security.Cryptography.X509Certificates.X509Store]::new($Name, $Location)
+            $Store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::OpenExistingOnly -bor [System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+        }
+        Else
+        {
+            $Store = $CertStore
+        }
     }
     Process
     {
