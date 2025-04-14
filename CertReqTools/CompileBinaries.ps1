@@ -1718,7 +1718,12 @@ public class SubmitCertificateRequestCommand
                     // If the resubmitted request fails, throw an exception
                     if (disposition != RequestDisposition.Issued)
                     {
-                        ThrowRequestException(disposition, req);
+                        // Update the CCertRequest object with the latest status by calling the RetrievePending() method. This populates values for the GetLastStatus() and GetDispositionMessage() methods.
+                        // If this is not done, the request object will return S_OK as the return code, which does not generate the appropriate exception.
+                        var reqDisp = (RequestDisposition)req.RetrievePending(requestId, configString);
+
+                        // Use the reqDisp variable to appropriately provide the correct RequestDisposition.
+                        ThrowRequestException(reqDisp, req);
                     }
                     
                     // Fetch the issued certificate
