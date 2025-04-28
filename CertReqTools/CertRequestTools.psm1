@@ -932,6 +932,11 @@ Function Export-PemCertificate
         [Alias("SkipExplorerView")]
         [Switch]
         $BatchMode
+
+        , [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()]
+        [String]
+        $DefaultExtension = "cer"
     )
     Process
     {
@@ -949,7 +954,6 @@ Function Export-PemCertificate
                 $OutputDirectory = $MyDocuments
             }
         }
-        $DefaultExtension = "cer"
         $OutputFilename = $null
         If ($ShowFileDialog)
         {
@@ -993,7 +997,12 @@ Function Export-PemCertificate
         {
             $Certificates = $Certificate
         }
-        $Pem = $Certificates | ConvertTo-Pem
+        $ChainBuilder = [System.Text.StringBuilder]::new()
+        Foreach ($PemCert in $Certificates | ConvertTo-Pem)
+        {
+            [Void]$ChainBuilder.AppendLine($PemCert.Trim())
+        }
+        $Pem = $ChainBuilder.ToString()
         If ($CopyToClipboard)
         {
             $Pem | Set-Clipboard
