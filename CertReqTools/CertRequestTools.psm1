@@ -1553,5 +1553,9 @@ Function Clear-TemplateCache
 }
 
 New-Alias -Name Save-Certificate -Value Install-Certificate
+New-Alias -Name Get-AdcsEnrollmentPolicy -Value Get-EnrollmentPolicy
+New-Alias -Name Get-AdcsCertificateTemplate -Value Get-CertificateTemplate
+New-Alias -Name Get-AdcsObjectProperty -Value Get-PkiObjectProperty
+New-Alias -Name Clear-AdcsTemplateCache -Value Clear-TemplateCache
 
 Export-ModuleMember -Function * -Cmdlet * -Alias *
