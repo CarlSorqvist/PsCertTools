@@ -1459,6 +1459,7 @@ Function Get-CertificateTemplate
         $EnrollmentPolicy = [EnrollmentHelper]::GetEnrollmentPolicy()
 
         , [Parameter(Mandatory = $true, ParameterSetName = "ByName")]
+        [Parameter(Mandatory = $false, ParameterSetName = "ByCA")]
         [Alias("Name")]
         [String]
         $TemplateName
@@ -1469,7 +1470,7 @@ Function Get-CertificateTemplate
     )
     Begin
     {
-        If ($PSCmdlet.ParameterSetName -ieq "ByName")
+        If ($PSCmdlet.ParameterSetName -ine "All")
         {
             $WildcardPattern = [X509Extensions.ExtendedKeyUsage]::ToWildcardPattern($TemplateName)
             $Options = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::Compiled
@@ -1482,21 +1483,31 @@ Function Get-CertificateTemplate
         {
             $PSCmdlet.WriteObject([EnrollmentHelper]::GetTemplates($EnrollmentPolicy), $true)
         }
-        ElseIf ($PSCmdlet.ParameterSetName -ieq "ByName")
+        Else # ByName or ByCA
         {
-            Foreach ($Template in [EnrollmentHelper]::GetTemplates($EnrollmentPolicy))
+            If ($PSCmdlet.ParameterSetName -ieq "ByName")
             {
-                If ($NameRegex.IsMatch($Template.Name))
+                $Templates = [EnrollmentHelper]::GetTemplates($EnrollmentPolicy)
+            }
+            Else # ByCA
+            {
+                $Templates = [EnrollmentHelper]::GetPublishedTemplates($EnrollmentPolicy, $PublishedOnCA)   
+            }
+            Foreach ($Template in $Templates)
+            {
+                If ($PSBoundParameters.ContainsKey("TemplateName"))
                 {
-                    $PSCmdlet.WriteObject($Template)
+                    If ($NameRegex.IsMatch($Template.Name))
+                    {
+                        $PSCmdlet.WriteObject($Template)
+                    }
+                }
+                Else
+                {
+                    $PSCmdlet.WriteObject($Templates, $true)
                 }
             }
         }
-        Else
-        {
-            $PSCmdlet.WriteObject([EnrollmentHelper]::GetPublishedTemplates($EnrollmentPolicy, $PublishedOnCA), $true)
-        }
-        
     }
 }
 Function Get-PkiObjectProperty
