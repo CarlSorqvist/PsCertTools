@@ -1,5 +1,7 @@
 ﻿#Requires -version 5
 
+Add-Type -AssemblyName System.Security -ErrorAction Stop
+
 Function New-PrivateKey
 {
     [CmdletBinding(DefaultParameterSetName = "RSA")]
@@ -292,6 +294,85 @@ Function Show-X509Object
             $Path = $OFD.FileName
         }
         certutil -dump $Path | Out-Host
+    }
+}
+
+Function Select-Certificate
+{
+    [CmdletBinding(DefaultParameterSetName = "ByStoreName")]
+    [OutputType([System.Security.Cryptography.X509Certificates.X509Certificate2])]
+    Param
+    (
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true, ParameterSetName = "ByCertificate")]
+        [System.Security.Cryptography.X509Certificates.X509Certificate2]
+        $Certificate
+
+        , [Parameter(Mandatory = $true, ValueFromPipeline = $true, ParameterSetName = "ByX509Store")]
+        [System.Security.Cryptography.X509Certificates.X509Store]
+        $X509Store
+
+        , [Parameter(Mandatory = $false, ParameterSetName = "ByStoreName")]
+        [Alias("Location")]
+        [System.Security.Cryptography.X509Certificates.StoreLocation]
+        $StoreLocation = [System.Security.Cryptography.X509Certificates.StoreLocation]::LocalMachine
+        
+        , [Parameter(Mandatory = $false, ParameterSetName = "ByStoreName")]
+        [Alias("Name")]
+        [System.Security.Cryptography.X509Certificates.StoreName]
+        
+        $StoreName = [System.Security.Cryptography.X509Certificates.StoreName]::My
+
+        , [Parameter(Mandatory = $false, ParameterSetName = "ByStoreName")]
+        [System.Security.Cryptography.X509Certificates.OpenFlags]
+        $OpenFlags = [System.Security.Cryptography.X509Certificates.OpenFlags]::OpenExistingOnly -bor [System.Security.Cryptography.X509Certificates.OpenFlags]::MaxAllowed
+
+        , [Parameter(Mandatory = $false, ParameterSetName = "ByStoreName")]
+        [System.Management.Automation.SwitchParameter]
+        $IncludeArchived
+
+        , [Parameter(Mandatory = $false)]
+        [System.Security.Cryptography.X509Certificates.X509SelectionFlag]
+        $SelectionFlag = [System.Security.Cryptography.X509Certificates.X509SelectionFlag]::SingleSelection
+
+        , [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()]
+        [System.String]
+        $Title = "Certificate selection"
+
+        , [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()]
+        [System.String]
+        $Message = "Select a certificate"
+    )
+    Begin
+    {
+        $Collection = [System.Security.Cryptography.X509Certificates.X509Certificate2Collection]::new()
+    }
+    Process
+    {
+        If ($PSCmdlet.ParameterSetName -ieq "ByCertificate")
+        {
+            [Void]$Collection.Add($Certificate)
+        }
+        ElseIf ($PSCmdlet.ParameterSetName -ieq "ByX509Store")
+        {
+            $Collection.AddRange($X509Store.Certificates)
+        }
+        ElseIf ($PSCmdlet.ParameterSetName -ieq "ByStoreName")
+        {
+            $Store = [System.Security.Cryptography.X509Certificates.X509Store]::new($StoreName, $StoreLocation)
+            $Flags = $OpenFlags
+            If ($IncludeArchived)
+            {
+                $Flags = $Flags -bor [System.Security.Cryptography.X509Certificates.OpenFlags]::IncludeArchived
+            }
+            $Store.Open($Flags)
+            $Collection.AddRange($Store.Certificates)
+        }
+    }
+    End
+    {
+        [System.Security.Cryptography.X509Certificates.X509Certificate2UI]::SelectFromCollection($Collection, $Title, $Message, $SelectionFlag)
     }
 }
 
